@@ -733,7 +733,7 @@ export async function searchFilesWithValidation(
 
 export async function grepFiles(
   paths: string[], 
-  searchString: string,
+  pattern: string,
   allowedDirectories: readonly string[],
   extensions: string[] = [],
   excludedFolderNames: string[] = [],
@@ -747,9 +747,9 @@ export async function grepFiles(
 
   let regex: RegExp;
   try {
-    regex = new RegExp(searchString, 'i');
+    regex = new RegExp(pattern, 'i');
   } catch (e) {
-    throw new Error(`Invalid regular expression: ${searchString}`);
+    throw new Error(`Invalid regular expression: ${pattern}`);
   }
 
   async function search(currentPath: string, visit: () => void, depth: number = 0) {

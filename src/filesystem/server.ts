@@ -101,7 +101,7 @@ const GrepFilesArgsSchema = z.object({
   paths: z 
     .union([z.string(), z.array(z.string())])
     .describe("The root directory or list of root directories to search within."),
-  searchString: z
+  pattern: z
     .string()
     .describe("The string or regular expression to search for within file contents. Case-insensitive by default."),
   extensions: z
@@ -712,7 +712,7 @@ export function createServer(
       
       const matches = await grepFiles(
         paths, 
-        args.searchString, 
+        args.pattern, 
         allowedDirectories, 
         args.extensions || [],
         args.excluded_folder_names || [],

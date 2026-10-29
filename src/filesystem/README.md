@@ -125,11 +125,13 @@ The server's directory access control follows this flow:
   - Bounded: see [Slow and very large trees](#slow-and-very-large-trees)
 
 - **grep_files**
-  - Search for a specific string within the contents of files in allowed directories.
+  - Search for a specific string or regular expression within the contents of files across one or more directories.
   - Inputs:
-    - `path` (string): The root directory to search within.
-    - `searchString` (string): The string to search for.
+    - `paths` (string or string[]): The root directory or list of root directories to search within.
+    - `pattern` (string): The string or regular expression to search for.
     - `extensions` (string[], optional): A list of file extensions to include (e.g., `['ts', 'md', 'txt']`). If omitted, all files are searched. This is useful for skipping binary files.
+    - `excluded_folder_names` (string[], optional): A list of folder names to exclude from the search (e.g., `['node_modules', '.git']`).
+    - `max_depth` (number, optional): Maximum depth to recurse into subdirectories. 0 means only the provided paths are searched.
   - Returns a list of matches including the file path, line number, and the line text.
 
 - **directory_tree**
