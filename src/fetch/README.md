@@ -22,7 +22,7 @@ The fetch tool will truncate the response, but by using the `start_index` argume
     - `max_length` (integer, optional): Maximum number of characters to return (default: 5000)
     - `start_index` (integer, optional): Start content from this character index (default: 0)
     - `raw` (boolean, optional): Get raw content without markdown conversion (default: false)
-    - Annotations: `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, `openWorldHint: true` (it only reads, and it reaches arbitrary hosts on the internet)
+    - Annotations: `readOnlyHint: true`, `destructiveHint: false`, `idempotentHint: true`, `openWorldHint: true` (it only reads, and it fetches hosts allowed by the server configuration)
 
 ### Prompts
 
@@ -33,7 +33,7 @@ The fetch tool will truncate the response, but by using the `start_index` argume
 
 ### Errors
 
-- A failed fetch (a robots.txt refusal, an unreachable page, an HTTP error status, a refused private address, an unusable proxy setting) and arguments that do not match the tool's schema are returned as a tool result with `isError: true`, whose text starts `Error executing tool fetch:` and says what went wrong, so the model can read it and decide what to do.
+- A failed fetch (a robots.txt refusal, an unreachable page, an HTTP error status, a refused private address, a domain not specified in --allowed_domains, an unusable proxy setting) and arguments that do not match the tool's schema are returned as a tool result with `isError: true`, whose text starts `Error executing tool fetch:` and says what went wrong, so the model can read it and decide what to do.
 - Calling a tool the server does not have is a JSON-RPC protocol error, `-32602` (`Unknown tool: <name>`), as the specification requires. So is getting a prompt it does not have (`Unknown prompt: <name>`), or the `fetch` prompt without its `url` (`URL is required`).
 - When the `fetch` prompt's fetch fails, the prompt still returns: its message holds the reason the fetch failed.
 
@@ -187,6 +187,16 @@ The client receives an error naming the refused address.
 
 To fetch from local or internal hosts (a development server, an intranet page), add the argument
 `--allow-private-ips` to the `args` list in the configuration.
+
+### Customization - Allowed domains
+
+By default, the server denies all fetch requests unless a list of allowed domains is explicitly provided. This prevents the agent from accessing arbitrary websites without your configuration.
+
+To allow fetching from specific domains, add the `--allow-domains` argument followed by one or more domain names to the `args` list in the configuration. Adding a domain automatically allows all of its subdomains.
+
+Example to allow both Google and GitHub:
+`--allow-domains google.com github.com`
+
 
 ### Customization - User-agent
 

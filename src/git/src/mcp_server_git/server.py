@@ -63,14 +63,8 @@ class GitTools(str, Enum):
     DIFF_UNSTAGED = "git_diff_unstaged"
     DIFF_STAGED = "git_diff_staged"
     DIFF = "git_diff"
-    COMMIT = "git_commit"
-    ADD = "git_add"
-    RESET = "git_reset"
     LOG = "git_log"
-    CREATE_BRANCH = "git_create_branch"
-    CHECKOUT = "git_checkout"
     SHOW = "git_show"
-
     BRANCH = "git_branch"
 
 
@@ -128,119 +122,6 @@ def git_diff(
     return _git_text(repo, "diff", f"--unified={context_lines}", target)
 
 
-def _has_staged_changes(repo: git.Repo) -> bool:
-    """Whether the index holds anything git would record as a commit.
-
-    Mirrors `git commit`, which refuses to create an empty commit unless
-    --allow-empty is given, but permits one while a merge is in progress.
-    """
-    if (Path(repo.git_dir) / "MERGE_HEAD").exists():
-        return True
-    if not repo.head.is_valid():
-        # Unborn branch: the first commit, so anything in the index counts.
-        return bool(repo.index.entries)
-    return bool(repo.index.diff(repo.head.commit))
-
-
-def git_commit(repo: git.Repo, message: str) -> str:
-    # repo.index.commit() writes a tree unconditionally, so without this check
-    # a caller that forgot to stage gets a hash back for an empty commit and no
-    # way to tell it apart from a real one.
-    if not _has_staged_changes(repo):
-        raise ValueError(
-            "No changes staged for commit. Use git_add to stage changes first; "
-            "git_status shows what is currently staged."
-        )
-    git_dir = Path(repo.git_dir)
-    merge_head = git_dir / "MERGE_HEAD"
-    if merge_head.exists():
-        # Conclude the merge as `git commit` does: HEAD plus every MERGE_HEAD
-        # commit as parents, then clear the merge state. index.commit() alone
-        # records only HEAD and leaves the repository mid-merge.
-        parents = [repo.head.commit] + [
-            repo.commit(sha) for sha in merge_head.read_text().split()
-        ]
-        commit = repo.index.commit(message, parent_commits=parents)
-        for name in ("MERGE_HEAD", "MERGE_MSG", "MERGE_MODE", "AUTO_MERGE"):
-            (git_dir / name).unlink(missing_ok=True)
-        autostash_note = _apply_merge_autostash(repo)
-    else:
-        commit = repo.index.commit(message)
-        autostash_note = ""
-    return f"Changes committed successfully with hash {commit.hexsha}{autostash_note}"
-
-
-def _apply_merge_autostash(repo: git.Repo) -> str:
-    """Reapply a `git merge --autostash` stash, as `git commit` does.
-
-    Mirrors git's sequencer: apply the stash, store it in the stash list if
-    that conflicts, then remove MERGE_AUTOSTASH. Returns a note for the reply,
-    empty when the merge had no autostash.
-    """
-    autostash = Path(repo.git_dir) / "MERGE_AUTOSTASH"
-    if not autostash.exists():
-        return ""
-    stash_oid = autostash.read_text().strip()
-    try:
-        repo.git.stash("apply", stash_oid)
-        note = "\nApplied autostash."
-    except git.GitCommandError:
-        repo.git.stash("store", "-m", "autostash", "-q", stash_oid)
-        note = (
-            "\nApplying autostash resulted in conflicts. Your changes are safe "
-            'in the stash; run "git stash pop" or "git stash drop" at any time.'
-        )
-    autostash.unlink()
-    return note
-
-
-def _index_entries(repo: git.Repo, files: list[str]) -> str:
-    """Mode, blob and stage of the index entries matching the pathspecs."""
-    return repo.git.ls_files("--stage", "--", *files)
-
-
-def git_add(repo: git.Repo, files: list[str]) -> str:
-    if not files:
-        # `git add --` with no pathspec is a no-op that exits 0.
-        raise ValueError(
-            "No files provided to stage. Pass one or more paths, "
-            "or ['.'] to stage everything."
-        )
-    if files == ["."]:
-        before = _index_entries(repo, files)
-        repo.git.add(".")
-    else:
-        # Defense in depth: validate each path resolves within the repository
-        # working tree to prevent path traversal (e.g. '../../etc/passwd' or an
-        # absolute path) from staging files outside repository boundaries.
-        repo_root = Path(repo.working_dir).resolve()
-        for f in files:
-            try:
-                resolved = (repo_root / f).resolve()
-            except (OSError, RuntimeError):
-                raise ValueError(f"Invalid path: '{f}'")
-            try:
-                resolved.relative_to(repo_root)
-            except ValueError:
-                raise ValueError(f"Path '{f}' is outside the repository '{repo_root}'")
-        before = _index_entries(repo, files)
-        # Use '--' to prevent files starting with '-' from being interpreted as options
-        repo.git.add("--", *files)
-    # `git add` exits 0 when it stages nothing (e.g. '.' on a clean tree), so
-    # read the outcome back from the index rather than the exit status.
-    if _index_entries(repo, files) == before:
-        return (
-            "No changes were staged: the given paths had nothing new to stage. "
-            "git_status shows what is modified or untracked."
-        )
-    return "Files staged successfully"
-
-
-def git_reset(repo: git.Repo) -> str:
-    repo.index.reset()
-    return "All staged changes reset"
-
-
 def git_log(
     repo: git.Repo,
     max_count: int = 10,
@@ -273,76 +154,6 @@ def git_log(
             f"Message: {commit.message}\n"
         )
     return log
-
-
-def git_create_branch(
-    repo: git.Repo, branch_name: str, base_branch: str | None = None
-) -> str:
-    # Defense in depth: reject names starting with '-' to prevent flag injection
-    if branch_name.startswith("-"):
-        raise FlagInjectionError(
-            f"Invalid branch name: '{branch_name}' - cannot start with '-'"
-        )
-    if base_branch and base_branch.startswith("-"):
-        raise FlagInjectionError(
-            f"Invalid base branch: '{base_branch}' - cannot start with '-'"
-        )
-    # The base is a reference (a branch, tag or remote-tracking ref) when one
-    # has that name, otherwise any commit-ish (a SHA, `HEAD~2`). With no base,
-    # it is the current branch, or the current commit on a detached HEAD, where
-    # GitPython's `active_branch` would raise TypeError. The reply names the
-    # base the branch was created from.
-    base: git.SymbolicReference | str
-    if base_branch:
-        try:
-            base = repo.references[base_branch]
-            base_label = f"'{base.name}'"
-        except IndexError:
-            try:
-                base = repo.commit(base_branch).hexsha
-            except (ODBError, ValueError) as e:
-                # BadName for an unknown name, ValueError for an object that
-                # is not a commit (a tree, say).
-                raise ValueError(
-                    f"Unknown base branch or commit: '{base_branch}'"
-                ) from e
-            base_label = f"commit {base[:7]}"
-    elif repo.head.is_detached:
-        base = repo.head.commit.hexsha
-        base_label = f"commit {base[:7]}"
-    else:
-        base = repo.active_branch
-        base_label = f"'{base.name}'"
-
-    # GitPython's create_head accepts a name that already points at the base
-    # commit, so check first rather than report a branch that was not created.
-    # Compare names: `in repo.heads` also matches IterableList attributes
-    # such as "append".
-    if any(head.name == branch_name for head in repo.heads):
-        raise ValueError(
-            f"Cannot create branch '{branch_name}': refs/heads/{branch_name} already exists"
-        )
-    repo.create_head(branch_name, base)
-    return f"Created branch '{branch_name}' from {base_label}"
-
-
-def git_checkout(repo: git.Repo, branch_name: str) -> str:
-    # Defense in depth: reject branch names starting with '-' to prevent flag injection,
-    # even if a malicious ref with that name exists (e.g. via filesystem manipulation)
-    if branch_name.startswith("-"):
-        raise FlagInjectionError(
-            f"Invalid branch name: '{branch_name}' - cannot start with '-'"
-        )
-    repo.rev_parse(
-        branch_name
-    )  # Validates branch_name is a real git ref, throws BadName if not
-    repo.git.checkout(branch_name)
-    # rev_parse accepts any revision, so branch_name may have been a sha, tag or
-    # remote-tracking ref rather than a branch. Report what actually happened instead of
-    # claiming a branch switch; a detached HEAD is easy to commit onto by mistake.
-    if repo.head.is_detached:
-        return f"HEAD is now detached at {repo.head.commit.hexsha[:7]}"
-    return f"Switched to branch '{repo.active_branch.name}'"
 
 
 def git_show(repo: git.Repo, revision: str) -> str:
@@ -684,36 +495,6 @@ def create_server(repository: Path | None) -> MCPServer:
         return f"Diff with {target}:\n{result}"
 
     @server.tool(
-        name=GitTools.COMMIT.value,
-        description="Records changes to the repository",
-        annotations=writes(destructive=False, idempotent=False),
-        structured_output=False,
-    )
-    @reports_failures
-    def commit(repo_path: str, message: str) -> str:
-        return git_commit(open_repo(repo_path), message)
-
-    @server.tool(
-        name=GitTools.ADD.value,
-        description="Adds file contents to the staging area",
-        annotations=writes(destructive=False, idempotent=True),
-        structured_output=False,
-    )
-    @reports_failures
-    def add(repo_path: str, files: Annotated[list[str], Field(min_length=1)]) -> str:
-        return git_add(open_repo(repo_path), files)
-
-    @server.tool(
-        name=GitTools.RESET.value,
-        description="Unstages all staged changes",
-        annotations=writes(destructive=True, idempotent=True),
-        structured_output=False,
-    )
-    @reports_failures
-    def reset(repo_path: str) -> str:
-        return git_reset(open_repo(repo_path))
-
-    @server.tool(
         name=GitTools.LOG.value,
         description="Shows the commit logs",
         annotations=READ_ONLY,
@@ -740,39 +521,6 @@ def create_server(repository: Path | None) -> MCPServer:
             open_repo(repo_path), max_count, start_timestamp, end_timestamp
         )
         return "Commit history:\n" + "\n".join(entries)
-
-    @server.tool(
-        name=GitTools.CREATE_BRANCH.value,
-        description="Creates a new branch from an optional base branch or commit",
-        annotations=writes(destructive=False, idempotent=False),
-        structured_output=False,
-    )
-    @reports_failures
-    def create_branch(
-        repo_path: str,
-        branch_name: str,
-        base_branch: Annotated[
-            str | None,
-            Field(
-                description=(
-                    "Branch, tag or commit SHA to create the branch from. "
-                    "Defaults to the current branch, or to the current commit "
-                    "when HEAD is detached"
-                )
-            ),
-        ] = None,
-    ) -> str:
-        return git_create_branch(open_repo(repo_path), branch_name, base_branch)
-
-    @server.tool(
-        name=GitTools.CHECKOUT.value,
-        description="Switches branches",
-        annotations=writes(destructive=False, idempotent=False),
-        structured_output=False,
-    )
-    @reports_failures
-    def checkout(repo_path: str, branch_name: str) -> str:
-        return git_checkout(open_repo(repo_path), branch_name)
 
     @server.tool(
         name=GitTools.SHOW.value,

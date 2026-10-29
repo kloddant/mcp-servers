@@ -27,6 +27,11 @@ def main():
         help="Extract HTML with the pure-Python extractor only, never starting Node.js "
         "or npm (by default Readability.js is used when Node.js is on PATH)",
     )
+    parser.add_argument(
+        "--allowed-domains",
+        nargs="+",
+        help="List of domains allowed for fetching. Subdomains are also allowed.",
+    )
 
     args = parser.parse_args()
     asyncio.run(
@@ -36,6 +41,7 @@ def main():
             args.proxy_url,
             args.allow_private_ips,
             not args.no_readability_js,
+            args.allowed_domains,
         )
     )
 

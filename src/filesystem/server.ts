@@ -18,15 +18,12 @@ import {
   validatePath,
   getFileStats,
   readFileContent,
-  writeFileContent,
-  createDirectory,
-  moveFile,
   searchFilesWithValidation,
-  applyFileEdits,
   tailFile,
   headFile,
   readdirWithTimeout,
   createEntryBudget,
+  grepFiles,
 } from "./lib.js";
 import { SERVER_VERSION } from "./version.js";
 
@@ -72,29 +69,6 @@ const ReadMultipleFilesArgsSchema = z.object({
     ),
 });
 
-const WriteFileArgsSchema = z.object({
-  path: z.string(),
-  content: z.string(),
-});
-
-const EditOperation = z.object({
-  oldText: z.string().describe("Text to search for - must match exactly"),
-  newText: z.string().describe("Text to replace with"),
-});
-
-const EditFileArgsSchema = z.object({
-  path: z.string(),
-  edits: z.array(EditOperation),
-  dryRun: z
-    .boolean()
-    .default(false)
-    .describe("Preview changes using git-style diff format"),
-});
-
-const CreateDirectoryArgsSchema = z.object({
-  path: z.string(),
-});
-
 const ListDirectoryArgsSchema = z.object({
   path: z.string(),
 });
@@ -113,11 +87,6 @@ const DirectoryTreeArgsSchema = z.object({
   excludePatterns: z.array(z.string()).optional().default([]),
 });
 
-const MoveFileArgsSchema = z.object({
-  source: z.string(),
-  destination: z.string(),
-});
-
 const SearchFilesArgsSchema = z.object({
   path: z.string(),
   pattern: z.string(),
@@ -127,6 +96,30 @@ const SearchFilesArgsSchema = z.object({
 const GetFileInfoArgsSchema = z.object({
   path: z.string(),
 });
+
+const GrepFilesArgsSchema = z.object({
+  paths: z 
+    .union([z.string(), z.array(z.string())])
+    .describe("The root directory or list of root directories to search within."),
+  searchString: z
+    .string()
+    .describe("The string or regular expression to search for within file contents. Case-insensitive by default."),
+  extensions: z
+    .array(z.string())
+    .optional()
+    .describe("Optional list of file extensions to include (e.g. ['ts', 'md', 'txt']). If omitted, all files are searched."),
+  excluded_folder_names: z
+    .array(z.string())
+    .optional()
+    .describe("Optional list of folder names to exclude from the search (e.g. ['node_modules', '.git'])."),
+  max_depth: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe("Optional maximum depth to recurse into subdirectories. 0 means only the provided paths are searched."),
+});
+
 
 // Reads a file as a stream of buffers, concatenates them, and then encodes
 // the result to a Base64 string. This is a memory-efficient way to handle
@@ -432,90 +425,6 @@ export function createServer(
   );
 
   server.registerTool(
-    "write_file",
-    {
-      title: "Write File",
-      description:
-        "Create a new file or completely overwrite an existing file with new content. " +
-        "Use with caution as it will overwrite existing files without warning. " +
-        "Handles text content with proper encoding. Only works within allowed directories.",
-      inputSchema: jsonSchema2020(WriteFileArgsSchema.shape),
-      outputSchema: jsonSchema2020({ content: z.string() }),
-      annotations: {
-        readOnlyHint: false,
-        idempotentHint: true,
-        destructiveHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args: z.infer<typeof WriteFileArgsSchema>) => {
-      const validPath = await validatePath(args.path, allowedDirectories);
-      await writeFileContent(validPath, args.content);
-      const text = `Successfully wrote to ${args.path}`;
-      return {
-        content: [{ type: "text" as const, text }],
-        structuredContent: { content: text },
-      };
-    },
-  );
-
-  server.registerTool(
-    "edit_file",
-    {
-      title: "Edit File",
-      description:
-        "Make line-based edits to a text file. Each edit replaces exact line sequences " +
-        "with new content. Returns a git-style diff showing the changes made. " +
-        "Only works within allowed directories.",
-      inputSchema: jsonSchema2020(EditFileArgsSchema.shape),
-      outputSchema: jsonSchema2020({ content: z.string() }),
-      annotations: {
-        readOnlyHint: false,
-        idempotentHint: false,
-        destructiveHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args: z.infer<typeof EditFileArgsSchema>) => {
-      const validPath = await validatePath(args.path, allowedDirectories);
-      const result = await applyFileEdits(validPath, args.edits, args.dryRun);
-      return {
-        content: [{ type: "text" as const, text: result }],
-        structuredContent: { content: result },
-      };
-    },
-  );
-
-  server.registerTool(
-    "create_directory",
-    {
-      title: "Create Directory",
-      description:
-        "Create a new directory or ensure a directory exists. Can create multiple " +
-        "nested directories in one operation. If the directory already exists, " +
-        "this operation will succeed silently. Perfect for setting up directory " +
-        "structures for projects or ensuring required paths exist. Only works within allowed directories.",
-      inputSchema: jsonSchema2020(CreateDirectoryArgsSchema.shape),
-      outputSchema: jsonSchema2020({ content: z.string() }),
-      annotations: {
-        readOnlyHint: false,
-        idempotentHint: true,
-        destructiveHint: false,
-        openWorldHint: false,
-      },
-    },
-    async (args: z.infer<typeof CreateDirectoryArgsSchema>) => {
-      const validPath = await validatePath(args.path, allowedDirectories);
-      await createDirectory(validPath);
-      const text = `Successfully created directory ${args.path}`;
-      return {
-        content: [{ type: "text" as const, text }],
-        structuredContent: { content: text },
-      };
-    },
-  );
-
-  server.registerTool(
     "list_directory",
     {
       title: "List Directory",
@@ -711,43 +620,6 @@ export function createServer(
   );
 
   server.registerTool(
-    "move_file",
-    {
-      title: "Move File",
-      description:
-        "Move or rename files and directories. Can move files between directories " +
-        "and rename them in a single operation. If the destination exists, the " +
-        "operation will fail. Works across different directories and can be used " +
-        "for simple renaming within the same directory. Both source and destination must be within allowed directories.",
-      inputSchema: jsonSchema2020(MoveFileArgsSchema.shape),
-      outputSchema: jsonSchema2020({ content: z.string() }),
-      annotations: {
-        readOnlyHint: false,
-        idempotentHint: false,
-        destructiveHint: true,
-        openWorldHint: false,
-      },
-    },
-    async (args: z.infer<typeof MoveFileArgsSchema>) => {
-      const validSourcePath = await validatePath(
-        args.source,
-        allowedDirectories,
-      );
-      const validDestPath = await validatePath(
-        args.destination,
-        allowedDirectories,
-      );
-      await moveFile(validSourcePath, validDestPath);
-      const text = `Successfully moved ${args.source} to ${args.destination}`;
-      const contentBlock = { type: "text" as const, text };
-      return {
-        content: [contentBlock],
-        structuredContent: { content: text },
-      };
-    },
-  );
-
-  server.registerTool(
     "search_files",
     {
       title: "Search Files",
@@ -824,6 +696,40 @@ export function createServer(
       };
     },
   );
+
+  server.registerTool(
+    "grep_files",
+    {
+      title: "Grep Files",
+      description: "Search for a specific string or regular expression within the contents of files across one or more directories. You can optionally limit the search to specific file extensions to avoid binary files.",
+      inputSchema: jsonSchema2020(GrepFilesArgsSchema.shape),
+      outputSchema: jsonSchema2020({ matches: z.array(z.object({ path: z.string(), line: z.number(), text: z.string() })) }),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async (args: z.infer<typeof GrepFilesArgsSchema>) => {
+      // Normalize paths to an array
+      const paths = Array.isArray(args.paths) ? args.paths : [args.paths];
+      
+      const matches = await grepFiles(
+        paths, 
+        args.searchString, 
+        allowedDirectories, 
+        args.extensions || [],
+        args.excluded_folder_names || [],
+        args.max_depth,
+      );
+      
+      const text = matches.length > 0 
+        ? matches.map(m => `${m.path}:${m.line} - ${m.text}`).join("\n") 
+        : "No matches found";
+
+      return {
+        content: [{ type: "text" as const, text }],
+        structuredContent: { matches },
+      };
+    },
+  );
+
 
   // Updates allowed directories based on MCP client roots, unless a newer
   // refresh started after this one's `generation` was taken (#5097).

@@ -224,6 +224,20 @@ def _is_page_chrome(tag: Tag) -> bool:
     return tag.name in _PAGE_CHROME_TAGS or tag.get("role") in _PAGE_CHROME_ROLES
 
 
+def _is_allowed_domain(host: str, allowed_domains: list[str]) -> bool:
+    """True when ``host`` is in the allowed list or is a subdomain of an allowed domain."""
+    if not allowed_domains:
+        return False
+    for domain in allowed_domains:
+        domain = domain.lower().strip()
+        if domain.startswith("."):
+            domain = domain[1:]
+        # Check for exact match or that the host ends with .domain
+        if host.lower() == domain or host.lower().endswith("." + domain):
+            return True
+    return False
+
+
 def _text_length(html: Tag) -> int:
     """The length of the text in ``html``, whitespace collapsed."""
     return len(" ".join(html.get_text(" ").split()))
@@ -461,6 +475,7 @@ async def check_may_autonomously_fetch_url(
     user_agent: str,
     proxy_url: str | None = None,
     allow_private_ips: bool = False,
+    allowed_domains: list[str] | None = None,
 ) -> None:
     """
     Check if the URL can be fetched by the user agent according to the robots.txt file.
@@ -473,6 +488,16 @@ async def check_may_autonomously_fetch_url(
     async with make_client(proxy_url) as client:
         if not allow_private_ips:
             client.event_hooks = {"request": [_refuse_private_destination]}
+
+        async def _refuse_disallowed_domain(request: httpx.Request) -> None:
+            host = request.url.raw_host.decode("ascii")
+            if not host or _is_allowed_domain(host, allowed_domains):
+                return
+            raise ToolError(f"Refused to fetch {request.url}: host {host} is not in the allowed domains list.")
+        current_hooks = client.event_hooks.get("request", [])
+        current_hooks.append(_refuse_disallowed_domain)
+        client.event_hooks = {"request": current_hooks}
+
         try:
             response = await client.get(
                 robot_txt_url,
@@ -527,6 +552,7 @@ async def fetch_url(
     allow_private_ips: bool = False,
     check_robots_txt: bool = False,
     use_readability_js: bool = True,
+    allowed_domains: list[str] | None = None,
 ) -> Tuple[str, str]:
     """
     Fetch the URL and return the content in a form ready for the LLM, as well as a prefix string with status information.
@@ -553,6 +579,17 @@ async def fetch_url(
         hooks: list[Callable[[httpx.Request], Awaitable[None]]] = []
         if not allow_private_ips:
             hooks.append(_refuse_private_destination)
+
+        async def _refuse_disallowed_domain(request: httpx.Request) -> None:
+            host = request.url.raw_host.decode("ascii")
+            if not host or _is_allowed_domain(host, allowed_domains):
+                return
+            raise ToolError(
+                f"Refused to fetch {request.url}: host {host} is not in the allowed domains list. "
+                f"Allowed domains: {', '.join(allowed_domains)}"
+            )
+        hooks.append(_refuse_disallowed_domain)
+
         if check_robots_txt:
             hooks.append(_check_redirect_robots_txt)
         if hooks:
@@ -640,6 +677,7 @@ def create_server(
     proxy_url: str | None = None,
     allow_private_ips: bool = False,
     use_readability_js: bool = True,
+    allowed_domains: list[str] | None = None,
 ) -> MCPServer:
     """Build the fetch server: the `fetch` tool, the `fetch` prompt, and the guard.
 
@@ -708,7 +746,7 @@ def create_server(
 
         if not ignore_robots_txt:
             await check_may_autonomously_fetch_url(
-                page_url, user_agent_autonomous, proxy_url, allow_private_ips
+                page_url, user_agent_autonomous, proxy_url, allow_private_ips, allowed_domains
             )
 
         content, prefix = await fetch_url(
@@ -719,6 +757,7 @@ def create_server(
             allow_private_ips=allow_private_ips,
             check_robots_txt=not ignore_robots_txt,
             use_readability_js=use_readability_js,
+            allowed_domains=allowed_domains,
         )
         original_length = len(content)
         if start_index >= original_length:
@@ -751,6 +790,7 @@ def create_server(
                 proxy_url=proxy_url,
                 allow_private_ips=allow_private_ips,
                 use_readability_js=use_readability_js,
+                allowed_domains=allowed_domains,
             )
         except ToolError as e:
             return str(e)
@@ -765,6 +805,7 @@ async def serve(
     proxy_url: str | None = None,
     allow_private_ips: bool = False,
     use_readability_js: bool = True,
+    allowed_domains: list[str] | None = None,
 ) -> None:
     """Run the fetch MCP server over stdio.
 
@@ -783,6 +824,7 @@ async def serve(
         proxy_url,
         allow_private_ips,
         use_readability_js,
+        allowed_domains,
     )
     # Both eras (#4853): the SDK's dual-era loop lets the client's first
     # request decide. `initialize` gets the 2025-11-25 handshake;

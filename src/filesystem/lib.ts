@@ -6,13 +6,6 @@ import { createTwoFilesPatch } from "diff";
 import { minimatch } from "minimatch";
 import { normalizePathFormat, expandHome } from "./path-utils.js";
 import { isPathWithinAllowedDirectories } from "./path-validation.js";
-import {
-  createDirectoryInPlace,
-  createFileInDirectory,
-  moveFileAcrossDevices,
-  overwriteFileInDirectory,
-  renameIntoDirectory,
-} from "./pinned-directory.js";
 
 // Type definitions
 interface FileInfo {
@@ -34,6 +27,13 @@ export interface SearchResult {
   path: string;
   isDirectory: boolean;
 }
+
+export interface GrepMatch {
+  path: string;
+  line: number;
+  text: string;
+}
+
 
 // Bounds on the filesystem calls a request can wait on, and on the recursive
 // walks (#4162). A path on a lazily materialized provider (a macOS
@@ -149,25 +149,6 @@ export function formatSize(bytes: number): string {
 
 export function normalizeLineEndings(text: string): string {
   return text.replace(/\r\n/g, "\n");
-}
-
-export function createUnifiedDiff(
-  originalContent: string,
-  newContent: string,
-  filepath: string = "file",
-): string {
-  // Ensure consistent line endings for diff
-  const normalizedOriginal = normalizeLineEndings(originalContent);
-  const normalizedNew = normalizeLineEndings(newContent);
-
-  return createTwoFilesPatch(
-    filepath,
-    filepath,
-    normalizedOriginal,
-    normalizedNew,
-    "original",
-    "modified",
-  );
 }
 
 // Helper function to resolve relative paths against allowed directories
@@ -560,102 +541,6 @@ export async function readFileContent(
   return await fs.readFile(filePath, encoding as BufferEncoding);
 }
 
-export async function writeFileContent(
-  filePath: string,
-  content: string,
-): Promise<void> {
-  try {
-    // Security: exclusive creation fails if a file or symlink exists, so a
-    // pre-existing symlink is never written through; the directory is pinned
-    // (see pinned-directory.ts), so a swapped one is never written through.
-    await createFileInDirectory(filePath, content);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-      await overwriteInPlace(filePath, content);
-    } else {
-      throw error;
-    }
-  }
-}
-
-/**
- * Replace an existing file's content in place, through a single handle.
- *
- * Writing through the existing file, rather than renaming a temp file over it,
- * keeps its identity: the inode, creation time (birthtime), hard links,
- * permission bits and anything watching it by inode all survive (#4512). It
- * also never renames over the target, which on Windows fails with EPERM when
- * another process holds the file open without FILE_SHARE_DELETE (#3199).
- *
- * Security: the path was validated before this runs, so something swapped in
- * since then must not be written through (TOCTOU):
- * - lstat refuses anything at the path that is not a regular file, a symlink
- *   included;
- * - the open happens inside the pinned directory (pinned-directory.ts), so a
- *   directory on the path swapped for a symlink cannot redirect it;
- * - O_NOFOLLOW makes the open itself fail with ELOOP on a symlink (POSIX
- *   only), and the opened handle must be the very file lstat saw (same device
- *   and inode, compared as BigInts so a 64-bit file id cannot round; where
- *   Windows reports no device for the path, same inode, size and mtime: see
- *   isSameEntry in pinned-directory.ts, #5154), which catches a swap between
- *   the lstat and the open. Once the handle is verified, every write goes
- *   through it.
- *
- * The trade-off is crash-atomicity: a crash mid-write leaves a partly written
- * file, where the rename left either the old content or the new.
- */
-async function overwriteInPlace(
-  filePath: string,
-  content: string,
-): Promise<void> {
-  const expected = await fs.lstat(filePath, { bigint: true });
-  if (!expected.isFile()) {
-    throw new Error(`Refusing to write: not a regular file: ${filePath}`);
-  }
-  await overwriteFileInDirectory(filePath, content, expected);
-}
-
-/** Create a directory and any missing parents (see pinned-directory.ts). */
-export async function createDirectory(directoryPath: string): Promise<void> {
-  createDirectoryInPlace(directoryPath);
-}
-
-export async function moveFile(
-  sourcePath: string,
-  destinationPath: string,
-): Promise<void> {
-  // The move_file tool contract (and README) state the operation fails if the
-  // destination already exists. fs.rename would silently overwrite it, which is
-  // a data-loss bug, so reject up front when anything - file, directory, or
-  // symlink - occupies the target. lstat is used so an existing symlink at the
-  // destination is detected rather than followed.
-  try {
-    await fs.lstat(destinationPath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      // The destination's directory is pinned (see pinned-directory.ts).
-      try {
-        renameIntoDirectory(sourcePath, destinationPath);
-      } catch (renameError) {
-        // rename cannot cross a device boundary: copy, then remove (#5188).
-        if ((renameError as NodeJS.ErrnoException).code !== "EXDEV") {
-          throw renameError;
-        }
-        await moveFileAcrossDevices(sourcePath, destinationPath);
-      }
-      return;
-    }
-    throw error;
-  }
-  throw new Error(`Destination already exists: ${destinationPath}`);
-}
-
-// File Editing Functions
-interface FileEdit {
-  oldText: string;
-  newText: string;
-}
-
 /**
  * The line ending a file predominantly uses: CRLF when more of its line breaks
  * are CRLF than bare LF, otherwise LF. A file with mixed endings is written
@@ -685,143 +570,6 @@ function indentUnit(lines: string[]): string {
     narrowest = Math.min(narrowest, indent.length);
   }
   return narrowest === Infinity ? "" : " ".repeat(narrowest);
-}
-
-/**
- * Reindents one replacement line for the whitespace-tolerant matcher: it gets
- * the indentation of `fileLine` (the file line it replaces), plus or minus the
- * difference between its own indentation and `oldLine`'s (the oldText line
- * that matched `fileLine`). A dedent never goes below no indentation. A blank
- * line is kept as given.
- *
- * When the edit and the file indent with different characters (tabs in one,
- * spaces in the other), the difference is counted in indent levels of the
- * edit's unit and applied in the file's unit, so four spaces of extra
- * indent in the edit become one tab in a tab-indented file.
- */
-function reindentLine(
-  line: string,
-  fileLine: string,
-  oldLine: string,
-  editUnit: string,
-  fileUnit: string,
-): string {
-  const body = line.trimStart();
-  if (body === "") return line;
-  const fileIndent = leadingWhitespace(fileLine);
-  const newIndent = leadingWhitespace(line);
-  const delta = newIndent.length - leadingWhitespace(oldLine).length;
-  if (editUnit && fileUnit && (editUnit === "\t") !== (fileUnit === "\t")) {
-    const levels = Math.trunc(delta / editUnit.length);
-    const indent =
-      levels >= 0
-        ? fileIndent + fileUnit.repeat(levels)
-        : fileIndent.slice(
-            0,
-            Math.max(0, fileIndent.length + levels * fileUnit.length),
-          );
-    return indent + body;
-  }
-  const indent =
-    delta >= 0
-      ? fileIndent + newIndent.slice(newIndent.length - delta)
-      : fileIndent.slice(0, Math.max(0, fileIndent.length + delta));
-  return indent + body;
-}
-
-export async function applyFileEdits(
-  filePath: string,
-  edits: FileEdit[],
-  dryRun: boolean = false,
-): Promise<string> {
-  // Read file content and normalize line endings, remembering which ending
-  // the file uses so the edited file is written back with it (#4991).
-  const rawContent = await fs.readFile(filePath, "utf-8");
-  const eol = detectLineEnding(rawContent);
-  const content = normalizeLineEndings(rawContent);
-
-  // Apply edits sequentially
-  let modifiedContent = content;
-  for (const edit of edits) {
-    const normalizedOld = normalizeLineEndings(edit.oldText);
-    const normalizedNew = normalizeLineEndings(edit.newText);
-
-    // If exact match exists, use it
-    if (modifiedContent.includes(normalizedOld)) {
-      modifiedContent = modifiedContent.replace(
-        normalizedOld,
-        () => normalizedNew,
-      );
-      continue;
-    }
-
-    // Otherwise, try line-by-line matching with flexibility for whitespace
-    const oldLines = normalizedOld.split("\n");
-    const contentLines = modifiedContent.split("\n");
-    let matchFound = false;
-
-    for (let i = 0; i <= contentLines.length - oldLines.length; i++) {
-      const potentialMatch = contentLines.slice(i, i + oldLines.length);
-
-      // Compare lines with normalized whitespace
-      const isMatch = oldLines.every((oldLine, j) => {
-        const contentLine = potentialMatch[j];
-        return oldLine.trim() === contentLine.trim();
-      });
-
-      if (isMatch) {
-        // Each replacement line takes the indentation of the file line it
-        // replaces, shifted by however much the edit indents or dedents it
-        // relative to the matching oldText line (#4990). Lines beyond
-        // oldText's length are placed relative to its last line.
-        const editUnit = indentUnit([
-          ...oldLines,
-          ...normalizedNew.split("\n"),
-        ]);
-        const fileUnit = indentUnit(contentLines);
-        const newLines = normalizedNew.split("\n").map((line, j) => {
-          const k = Math.min(j, oldLines.length - 1);
-          return reindentLine(
-            line,
-            potentialMatch[k],
-            oldLines[k],
-            editUnit,
-            fileUnit,
-          );
-        });
-
-        contentLines.splice(i, oldLines.length, ...newLines);
-        modifiedContent = contentLines.join("\n");
-        matchFound = true;
-        break;
-      }
-    }
-
-    if (!matchFound) {
-      throw new Error(`Could not find exact match for edit:\n${edit.oldText}`);
-    }
-  }
-
-  // Create unified diff
-  const diff = createUnifiedDiff(content, modifiedContent, filePath);
-
-  // Write the file back with the line ending it was read with (#4991).
-  if (eol === "\r\n") {
-    modifiedContent = modifiedContent.replace(/\n/g, "\r\n");
-  }
-
-  // Format diff with appropriate number of backticks
-  let numBackticks = 3;
-  while (diff.includes("`".repeat(numBackticks))) {
-    numBackticks++;
-  }
-  const formattedDiff = `${"`".repeat(numBackticks)}diff\n${diff}${"`".repeat(numBackticks)}\n\n`;
-
-  if (!dryRun) {
-    await overwriteInPlace(filePath, modifiedContent);
-  }
-
-  return formattedDiff;
 }
 
 // Memory-efficient implementation to get the last N lines of a file
@@ -978,5 +726,84 @@ export async function searchFilesWithValidation(
   }
 
   await search(rootPath);
+  return results;
+}
+
+
+
+export async function grepFiles(
+  paths: string[], 
+  searchString: string,
+  allowedDirectories: readonly string[],
+  extensions: string[] = [],
+  excludedFolderNames: string[] = [],
+  maxDepth?: number,
+): Promise<GrepMatch[]> {
+  const results: GrepMatch[] = [];
+  
+  const normalizedExts = extensions.map(ext => 
+    ext.startsWith('.') ? ext.toLowerCase() : `.${ext.toLowerCase()}`
+  );
+
+  let regex: RegExp;
+  try {
+    regex = new RegExp(searchString, 'i');
+  } catch (e) {
+    throw new Error(`Invalid regular expression: ${searchString}`);
+  }
+
+  async function search(currentPath: string, visit: () => void, depth: number = 0) {
+    const entries = await readdirWithTimeout(currentPath);
+
+        for (const entry of entries) {
+      const fullPath = path.join(currentPath, entry.name);
+      
+      // Guard 1: Excluded folder names
+      if (entry.isDirectory() && excludedFolderNames.includes(entry.name)) {
+        continue;
+      }
+      
+      try {
+        await validatePath(fullPath, allowedDirectories);
+
+        // Handle files first to keep the directory logic as a clean trailing block
+        if (entry.isFile()) {
+          if (normalizedExts.length > 0) {
+            const ext = path.extname(fullPath).toLowerCase();
+            if (!normalizedExts.includes(ext)) continue;
+          }
+
+          const content = await readFileContent(fullPath);
+          const lines = content.split('\n');
+          lines.forEach((line, index) => {
+            if (regex.test(line)) {
+              results.push({
+                path: fullPath,
+                line: index + 1,
+                text: line.trim(),
+              });
+            }
+          });
+        } 
+        // Handle directories with a guard for depth
+        else if (entry.isDirectory()) {
+          if (maxDepth !== undefined && depth >= maxDepth) continue;
+          await search(fullPath, visit, depth + 1);
+        }
+      } catch (error) {
+        if (error instanceof FsTimeoutError || error instanceof WalkLimitError) {
+          throw error;
+        }
+        continue;
+      }
+      visit();
+    }
+  }
+
+  for (const rootPath of paths) {
+    const visit = createEntryBudget("grep_files", rootPath);
+    await search(rootPath, visit);
+  }
+
   return results;
 }

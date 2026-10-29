@@ -6,10 +6,10 @@ Published on npm as [`@modelcontextprotocol/server-filesystem`](https://www.npmj
 
 ## Features
 
-- Read/write files
-- Create/list/delete directories
-- Move files/directories
+- Read files
+- List directories
 - Search files
+- Grep files
 - Get file metadata
 - Directory access control from command-line arguments, with [Roots](https://modelcontextprotocol.io/docs/learn/client-concepts#roots) as a deprecated, 2025-era convenience
 - Serves both protocol eras on stdio: 2026-07-28 clients (`server/discover`, no handshake) and 2025-era clients (`initialize`)
@@ -100,49 +100,6 @@ The server's directory access control follows this flow:
   - Input: `paths` (string[])
   - Failed reads won't stop the entire operation
 
-- **write_file**
-  - Create new file or overwrite existing (exercise caution with this)
-  - Inputs:
-    - `path` (string): File location
-    - `content` (string): File content
-  - An existing file is overwritten in place, so it keeps its inode, creation
-    time, hard links and permissions (`edit_file` writes the same way). The
-    overwrite is not crash-atomic: a crash mid-write can leave the file partly
-    written. A read-only file is refused rather than replaced
-  - Allowed-directory checks are path-based: they check the name you pass,
-    not every name the file has. A hard link is a real name of the same file,
-    so when a file inside an allowed directory is also hard-linked from
-    somewhere else (pnpm, for example, hard-links package files into
-    `node_modules` from its store), overwriting or editing it changes the
-    content at every name, inside the allowed directories or not.
-    `get_file_info` reports a file's `hardLinks` count; more than 1 means
-    the file has other names
-
-- **edit_file**
-  - Make selective edits using advanced pattern matching and formatting
-  - Features:
-    - Line-based and multi-line content matching
-    - Whitespace normalization with indentation preservation
-    - Multiple simultaneous edits with correct positioning
-    - Indentation style detection and preservation: when only whitespace differs, each replacement line takes the indentation of the line it replaces
-    - Preserves the file's line endings (LF or CRLF)
-    - Git-style diff output with context
-    - Preview changes with dry run mode
-  - Inputs:
-    - `path` (string): File to edit
-    - `edits` (array): List of edit operations
-      - `oldText` (string): Text to search for (can be substring)
-      - `newText` (string): Text to replace with
-    - `dryRun` (boolean): Preview changes without applying (default: false)
-  - Returns detailed diff and match information for dry runs, otherwise applies changes
-  - Best Practice: Always use dryRun first to preview changes before applying them
-
-- **create_directory**
-  - Create new directory or ensure it exists
-  - Input: `path` (string)
-  - Creates parent directories if needed
-  - Succeeds silently if directory exists
-
 - **list_directory**
   - List directory contents with [FILE] or [DIR] prefixes
   - Input: `path` (string)
@@ -155,19 +112,6 @@ The server's directory access control follows this flow:
   - Returns detailed listing with file sizes and summary statistics
   - Shows total files, directories, and combined size
 
-- **move_file**
-  - Move or rename files and directories
-  - Inputs:
-    - `source` (string)
-    - `destination` (string)
-  - Fails if destination exists
-  - Across filesystems (the source and destination on different mounts or
-    disks), a regular file is moved by copying it to a newly created
-    destination, with its permissions and modification time, and then removing
-    the source. If the copy fails, the partial destination is removed and the
-    source is left in place. A directory cannot be moved across filesystems
-    and fails with an error; move its files one at a time instead
-
 - **search_files**
   - Recursively search for files/directories that match or do not match patterns
   - Inputs:
@@ -179,6 +123,14 @@ The server's directory access control follows this flow:
   - Glob-style pattern matching
   - Returns full paths to matches
   - Bounded: see [Slow and very large trees](#slow-and-very-large-trees)
+
+- **grep_files**
+  - Search for a specific string within the contents of files in allowed directories.
+  - Inputs:
+    - `path` (string): The root directory to search within.
+    - `searchString` (string): The string to search for.
+    - `extensions` (string[], optional): A list of file extensions to include (e.g., `['ts', 'md', 'txt']`). If omitted, all files are searched. This is useful for skipping binary files.
+  - Returns a list of matches including the file path, line number, and the line text.
 
 - **directory_tree**
   - Get recursive JSON tree structure of directory contents
@@ -257,12 +209,9 @@ The mapping for filesystem tools is:
 | `list_directory_with_sizes` | `true`       | –              | –               | Pure read                                       |
 | `directory_tree`            | `true`       | –              | –               | Pure read                                       |
 | `search_files`              | `true`       | –              | –               | Pure read                                       |
+| `grep_files`                | `true`       | -              | -               | Pure read                                       |
 | `get_file_info`             | `true`       | –              | –               | Pure read                                       |
 | `list_allowed_directories`  | `true`       | –              | –               | Pure read                                       |
-| `create_directory`          | `false`      | `true`         | `false`         | Re‑creating the same dir is a no‑op             |
-| `write_file`                | `false`      | `true`         | `true`          | Overwrites existing files                       |
-| `edit_file`                 | `false`      | `false`        | `true`          | Re‑applying edits can fail or double‑apply      |
-| `move_file`                 | `false`      | `false`        | `true`          | Deletes source file                             |
 
 > Note: `idempotentHint` and `destructiveHint` are meaningful only when `readOnlyHint` is `false`, as defined by the MCP spec. Every tool also sets `openWorldHint: false` — this server only accesses the local filesystem within its allowed directories, never an open or external world.
 
