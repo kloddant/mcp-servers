@@ -1,15 +1,82 @@
 {
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/session-instructions-check.mjs\"",
-            "timeout": 30
-          }
-        ]
-      }
+  "disableAutoMode": "disable",
+  "disableAllHooks": true,
+  "disableBypassPermissionsMode": "disable",
+  "strictKnownMarketplaces": [],
+  "additionalDirectories": [],
+  "permissions": {
+    "defaultMode": "dontAsk",
+    "allow": [
+      "Read",
+      "Glob"
+    ],
+    "ask": [],
+    "deny": [
+      "Bash",
+      "PowerShell",
+      "BashOutput",
+      "KillShell",
+      "Write",
+      "Edit",
+      "NotebookEdit",
+      "Task",
+      "Agent",
+      "TaskOutput",
+      "TaskStop",
+      "Skill",
+      "EnterWorktree",
+      "ExitWorktree",
+      "WebFetch",
+      "WebSearch",
+      "mcp__*",
+      "Edit(//**)",
+      "Read(./.env)",
+      "Read(./env.json)",
+      "Read(./.git.*)",
+      "Read(//**/.env)",
+      "Read(//**/.env.*)",
+      "Read(//**/*.pem)",
+      "Read(//**/*.p12)",
+      "Read(//**/*.pfx)",
+      "Read(//**/id_rsa*)",
+      "Read(//**/id_ecdsa*)",
+      "Read(//**/id_ed25519*)",
+      "Read(~/.ssh/**)",
+      "Read(~/.gnupg/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.kube/**)",
+      "Read(~/.docker/**)",
+      "Read(~/.config/gh/**)",
+      "Read(~/.netrc)",
+      "Read(~/.npmrc)",
+      "Read(~/.pypirc)",
+      "Read(~/.git-credentials)",
+      "Read(~/.claude/**)",
+      "Read(~/.claude.json)",
+      "Read(~/Library/Keychains/**)",
+      "Read(//**/.git/config)"
     ]
-  }
+  },
+  "allowedMcpServers": [],
+  "deniedMcpServers": [],
+  "disableSkillShellExecution": true,
+  "disableSideloadFlags": true,
+  "strictPluginOnlyCustomization": true,
+  "disableCommandPluginSources": true,
+  "disableBundledSkills": true,
+  "disableWorkflows": true,
+  "disableClaudeAiConnectors": true,
+  "enableAllProjectMcpServers": false,
+  "enableArtifact": false,
+  "disableAgentView": true,
+  "disableRemoteControl": true,
+  "disableDeepLinkRegistration": "disable",
+  "channelsEnabled": false,
+  "crossSessionInbound": "refuse",
+  "includeGitInstructions": false,
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://localhost:9931",
+    "DISABLE_AUTOUPDATER": "1"
+  },
+  "theme": "dark"
 }

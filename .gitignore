@@ -307,3 +307,6 @@ cython_debug/
 # The Python `lib/` pattern above would swallow the root tooling's shared
 # helpers; `scripts/lib/` is first-party source.
 !scripts/lib/
+
+*.sublime-project
+*.sublime-workspace

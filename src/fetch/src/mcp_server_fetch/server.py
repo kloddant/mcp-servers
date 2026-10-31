@@ -553,6 +553,7 @@ async def fetch_url(
     check_robots_txt: bool = False,
     use_readability_js: bool = True,
     allowed_domains: list[str] | None = None,
+    method: str = "GET",
 ) -> Tuple[str, str]:
     """
     Fetch the URL and return the content in a form ready for the LLM, as well as a prefix string with status information.
@@ -562,6 +563,9 @@ async def fetch_url(
     already checked the requested URL itself.
     """
     from httpx import HTTPError
+
+    if method.upper() not in ("GET", "HEAD"):
+        raise ToolError(f"Unsupported HTTP method: {method}. Only GET and HEAD are allowed.")
 
     seen_first_request = False
 
@@ -595,7 +599,8 @@ async def fetch_url(
         if hooks:
             client.event_hooks = {"request": hooks}
         try:
-            response = await client.get(
+            response = await client.request(
+                method,
                 url,
                 follow_redirects=True,
                 headers={"User-Agent": user_agent},
@@ -607,6 +612,10 @@ async def fetch_url(
             raise ToolError(
                 f"Failed to fetch {url} - status code {response.status_code}"
             )
+
+        if method.upper() == "HEAD":
+            headers_text = "\n".join([f"{k}: {v}" for k, v in response.headers.items()])
+            return headers_text, "HTTP HEAD response headers:\n"
 
         page_raw = decode_page(response)
 
@@ -713,6 +722,7 @@ def create_server(
     # accepting arguments the advertised inputSchema rejects.
     async def fetch(
         url: Annotated[AnyUrl, Field(description="URL to fetch")],
+        method: Annotated[str, Field(description="HTTP method to use. Defaults to 'GET'.", pattern="^(GET|HEAD)$")] = "GET",
         max_length: Annotated[
             int,
             Field(
@@ -742,6 +752,10 @@ def create_server(
             ),
         ] = False,
     ) -> str:
+
+        if method.upper() not in ("GET", "HEAD"):
+            raise ToolError(f"Unsupported HTTP method: {method}. Only GET and HEAD are allowed.")
+
         page_url = str(url)
 
         if not ignore_robots_txt:
@@ -758,6 +772,7 @@ def create_server(
             check_robots_txt=not ignore_robots_txt,
             use_readability_js=use_readability_js,
             allowed_domains=allowed_domains,
+            method=method,
         )
         original_length = len(content)
         if start_index >= original_length:
