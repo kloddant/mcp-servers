@@ -1,5 +1,5 @@
 [project]
-name = "html"
+name = "math"
 version = "2026.11.1.0"
 description = "A Model Context Protocol server providing tools to perform mathematical functions."
 readme = "README.md"

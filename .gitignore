@@ -311,3 +311,6 @@ cython_debug/
 *.sublime-project
 *.sublime-workspace
 uv.lock
+env.json
+*.pem
+*.ppk

@@ -1,5 +1,5 @@
 [project]
-name = "html"
+name = "regex"
 version = "2026.11.1.0"
 description = "A Model Context Protocol server providing tools to work with regular expressions."
 readme = "README.md"
