@@ -11,7 +11,7 @@ objects: dict[str, object] = {}
 
 
 @mcp.tool()
-def regex_compile(pattern: str = "", flags: int = 0) -> str:
+def regex__compile(pattern: str = "", flags: int = 0) -> str:
 	"""
 		Purpose: Compile a regular expression pattern into a regular expression object.
 		Returns: Id of pattern object.
@@ -23,7 +23,7 @@ def regex_compile(pattern: str = "", flags: int = 0) -> str:
 
 
 @mcp.tool()
-def regex_query(obj_id: str, attr: str, args: list|None = None, kwargs: dict|None = None):
+def regex__query(obj_id: str, attr: str, args: list|None = None, kwargs: dict|None = None):
 	"""
 		Purpose: To execute methods and retrieve property values of regular expression re.Match and re.Pattern objects.
 		Parameters:
@@ -74,7 +74,7 @@ def regex_query(obj_id: str, attr: str, args: list|None = None, kwargs: dict|Non
 
 
 @mcp.tool()
-def regex_inspect(obj_id: str) -> list:
+def regex__inspect(obj_id: str) -> list:
 	"""
 		Purpose: List all available attributes and methods for a specific Regex object.
 	"""

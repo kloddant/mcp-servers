@@ -47,7 +47,7 @@ class Location:
 
 
 @mcp.tool()
-def geography_location(address: str = "", latitude: float = None, longitude: float = None) -> str:
+def geography__location(address: str = "", latitude: float = None, longitude: float = None) -> str:
 	"""
 		Purpose: Create a Location object and return its id.
 		Returns: Id of Location object.
@@ -63,7 +63,7 @@ def geography_location(address: str = "", latitude: float = None, longitude: flo
 
 
 @mcp.tool()
-def geography_query(obj_id: str, attr: str, args: list|None = None, kwargs: dict|None = None):
+def geography__query(obj_id: str, attr: str, args: list|None = None, kwargs: dict|None = None):
 	"""
 		Purpose: To execute methods and retrieve property values of Location objects.
 		Parameters:
@@ -118,7 +118,7 @@ def geography_query(obj_id: str, attr: str, args: list|None = None, kwargs: dict
 
 
 @mcp.tool()
-def geography_inspect(obj_id: str) -> list:
+def geography__inspect(obj_id: str) -> list:
 	"""
 		Purpose: List all available attributes and methods for a specific Location object.
 	"""

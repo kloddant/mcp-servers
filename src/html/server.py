@@ -12,7 +12,7 @@ objects: dict[str, object] = {}
 
 
 @mcp.tool()
-def html_parse(html: str = "", parser: Literal["html.parser", "lxml", "lxml-xml", "html5lib"] = "html.parser") -> str:
+def html__parse(html: str = "", parser: Literal["html.parser", "lxml", "lxml-xml", "html5lib"] = "html.parser") -> str:
 	"""
 		Purpose: Parse html strings.
 		Produces: Soup id.
@@ -24,7 +24,7 @@ def html_parse(html: str = "", parser: Literal["html.parser", "lxml", "lxml-xml"
 
 
 @mcp.tool()
-def html_query(obj_id: str, attr: str, args: list|None = None, kwargs: dict|None = None):
+def html__query(obj_id: str, attr: str, args: list|None = None, kwargs: dict|None = None):
 	"""
 		Purpose: To execute methods and retrieve property values of bs4 objects.
 		Parameters:
@@ -75,7 +75,7 @@ def html_query(obj_id: str, attr: str, args: list|None = None, kwargs: dict|None
 
 
 @mcp.tool()
-def html_inspect(obj_id: str) -> list:
+def html__inspect(obj_id: str) -> list:
 	"""
 		Purpose: List all available attributes and methods for a specific Html object.
 	"""

@@ -8,7 +8,7 @@ mcp = MCPServer("Math")
 
 
 @mcp.tool()
-def math_calculate(func: str, args: list|None = None, kwargs: dict|None = None):
+def math__calculate(func: str, args: list|None = None, kwargs: dict|None = None):
 	"""
 		Purpose: Perform a mathematical calculation using the Python math module.
 		Parameters:

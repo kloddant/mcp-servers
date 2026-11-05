@@ -68,12 +68,13 @@ class SessionManager:
 
 
 @mcp.tool()
-async def list_available_servers() -> List[str]:
+async def ssh__list_available_servers() -> List[str]:
 	"""Returns a list of available SSH servers the LLM can access."""
 	return list(manager.config['servers'].keys())
 
+
 @mcp.tool()
-async def list_remote_files(server_id: str, path: str = "."):
+async def ssh__list_remote_files(server_id: str, path: str = "."):
 	"""Lists files in a directory on a specific server. Path must be whitelisted."""
 	if not manager.is_path_allowed(server_id, path):
 		return f"Access Denied: Path {path} is not in the whitelist for {server_id}."
@@ -87,8 +88,9 @@ async def list_remote_files(server_id: str, path: str = "."):
 	except Exception as e:
 		return f"Error: {str(e)}"
 
+
 @mcp.tool()
-async def read_remote_file(server_id: str, path: str):
+async def ssh__read_remote_file(server_id: str, path: str):
 	"""Reads a file from a specific server. Path must be whitelisted."""
 	if not manager.is_path_allowed(server_id, path):
 		return f"Access Denied: Path {path} is not in the whitelist for {server_id}."
