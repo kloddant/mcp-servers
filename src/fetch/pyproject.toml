@@ -10,5 +10,6 @@ keywords = []
 dependencies = [
     "mcp",
     "typeguard",
+    "dill",
     "requests",
 ]

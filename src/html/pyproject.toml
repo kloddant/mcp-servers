@@ -11,5 +11,6 @@ dependencies = [
     "mcp",
     "mcp[cli]",
     "typeguard",
+    "dill",
     "beautifulsoup4",
 ]

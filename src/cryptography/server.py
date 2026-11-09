@@ -1,4 +1,4 @@
-import uuid, hashlib, os, base64
+import uuid, hashlib, os, base64, dill, tempfile
 from mcp.server import MCPServer
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.asymmetric import padding, ed25519, x25519, rsa
@@ -7,6 +7,7 @@ from cryptography.hazmat.primitives.hpke import Suite, KEM, KDF, AEAD
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import serialization
 from typing import Literal
+from pathlib import Path
 
 DEFAULT_HPKE_SUITE = Suite(KEM.X25519, KDF.HKDF_SHA256, AEAD.AES_128_GCM)
 
@@ -417,3 +418,55 @@ def cryptography__generate_salt(length: int = 16) -> str:
 	salt_id = str(uuid.uuid4())
 	objects[salt_id] = salt
 	return salt_id
+
+
+@mcp.tool()
+def cryptography__base64_encode(value_id: str) -> str:
+	"""
+	Purpose: Converts binary data stored in the server into a Base64 encoded string.
+	Parameters: value_id (UUID).
+	Produces: The Base64 encoded string representation of the binary data.
+	"""
+	if value_id not in objects:
+		return "Error: Value ID not found."
+	
+	obj = objects[value_id]
+	if not isinstance(obj, bytes):
+		return "Error: The referenced object is not binary data."
+	
+	try:
+		return base64.b64encode(obj).decode('utf-8')
+	except UnicodeDecodeError as e:
+		return "Error: Failed to decode Base64 result to UTF-8. {}".format(str(e))
+
+
+@mcp.tool()
+def cryptography__base64_decode(base64_string: str) -> str:
+	"""
+	Purpose: Decodes a Base64 encoded string and stores the resulting binary data in the server.
+	Parameters: base64_string (str).
+	Produces: A UUID handle to the resulting binary data.
+	"""
+	try:
+		binary_data = base64.b64decode(base64_string)
+	except Exception as e:
+		return "Error: Invalid Base64 string. {}".format(str(e))
+	
+	id = str(uuid.uuid4())
+	objects[id] = binary_data
+	return id
+
+
+@mcp.tool()
+async def cryptography__get_documentation() -> str:
+	"""
+	Purpose: Retrieves the server's documentation, including the state management guide and recommended workflows.
+	Produces: The full text of the project readme.
+	"""
+	try:
+		# Resolve the path relative to this script's location
+		readme_path = Path(__file__).parent / "readme.md"
+		with open(readme_path, "r", encoding="utf-8") as f:
+			return f.read()
+	except Exception as e:
+		return "Documentation currently unavailable: {0}".format(str(e))

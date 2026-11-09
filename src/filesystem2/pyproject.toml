@@ -1,0 +1,14 @@
+[project]
+name = "filesystem"
+version = "2026.11.8.0"
+description = "A Model Context Protocol server providing tools to read the user's filesystem."
+readme = "readme.md"
+requires-python = ">=3.14"
+authors = [{ name = "Tony Klodd" }]
+maintainers = [{ name = "Tony Klodd" }]
+keywords = []
+dependencies = [
+    "mcp",
+    "typeguard",
+    "dill",
+]

@@ -1,9 +1,10 @@
-import uuid
+import uuid, dill, tempfile
 from mcp.server import MCPServer
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic, great_circle
 from mcp.server.mcpserver.exceptions import ToolError
 from collections.abc import Iterable
+from pathlib import Path
 
 mcp = MCPServer("Geography")
 
@@ -126,3 +127,50 @@ def geography__inspect(obj_id: str) -> list:
 	if not obj:
 		raise ToolError(f"No existing object found with the id {obj_id}.")
 	return [attr for attr in dir(obj) if not attr.startswith('__')]
+
+
+@mcp.tool()
+async def geography__save_object(id: str) -> str:
+	"""
+	Saves a stored object to the filesystem to avoid context window limits.
+	Returns the absolute path to the saved file.
+	"""
+	if id not in objects:
+		raise ValueError("No object found with ID: {0}".format(id))
+
+	# Get the object from memory
+	obj = objects[id]
+
+	# Define the 'jan' directory within the system temp folder
+	jan_dir = Path(tempfile.gettempdir()) / "jan"
+	
+	# Create the directory if it doesn't exist
+	jan_dir.mkdir(parents=True, exist_ok=True)
+
+	# Create the final file path
+	filename = f"mcp_obj_{id}.pkl"
+	file_path = jan_dir / filename
+
+	try:
+		# Save the object using dill in binary mode
+		with open(file_path, "wb") as f:
+			dill.dump(obj, f)
+	except Exception as e:
+		raise ToolError(f"Failed to serialize object {id}: {str(e)}")
+
+	return str(file_path)
+
+
+@mcp.tool()
+async def geography__get_documentation() -> str:
+	"""
+	Purpose: Retrieves the server's documentation, including the state management guide and recommended workflows.
+	Produces: The full text of the project readme.
+	"""
+	try:
+		# Resolve the path relative to this script's location
+		readme_path = Path(__file__).parent / "readme.md"
+		with open(readme_path, "r", encoding="utf-8") as f:
+			return f.read()
+	except Exception as e:
+		return "Documentation currently unavailable: {0}".format(str(e))

@@ -1,8 +1,9 @@
-import uuid, asyncio, requests, json
+import uuid, asyncio, requests, json, dill, tempfile
 from typing import Literal, Dict, Set, Optional
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 from mcp.server import MCPServer
+from pathlib import Path
 
 mcp = MCPServer("fetch")
 
@@ -23,13 +24,13 @@ session = requests.Session()
 
 
 @mcp.tool()
-async def get_allowed_hosts() -> str:
+async def fetch__get_allowed_hosts() -> str:
 	"""Returns the list of hostnames and domains that this server is allowed to fetch from."""
 	return ", ".join(allowed_hosts)
 
 
 @mcp.tool()
-async def fetch(
+async def fetch__fetch(
 	url: str, 
 	method: Literal['GET', 'QUERY', 'HEAD', 'OPTIONS', 'TRACE'] = 'GET', 
 	http_request_headers: Optional[Dict[str, str]] = None,
@@ -113,7 +114,7 @@ async def fetch(
 
 
 @mcp.tool()
-async def get_response_content(id: str) -> str:
+async def fetch__get_response_content(id: str) -> str:
 	"""Retrieves the body content of a previously fetched response. Returns a warning for binary content."""
 	if id not in objects:
 		raise ValueError("No response found with ID: {0}".format(id))
@@ -128,7 +129,7 @@ async def get_response_content(id: str) -> str:
 
 
 @mcp.tool()
-async def get_response_status(id: str) -> str:
+async def fetch__get_response_status(id: str) -> str:
 	"""Retrieves the HTTP status code of a previously fetched response."""
 	if id not in objects:
 		raise ValueError("No response found with ID: {0}".format(id))
@@ -136,7 +137,7 @@ async def get_response_status(id: str) -> str:
 
 
 @mcp.tool()
-async def get_response_headers(id: str, header: Optional[str] = None) -> str:
+async def fetch__get_response_headers(id: str, header: Optional[str] = None) -> str:
 	"""Retrieves a specific header value or all headers as JSON from a previously fetched response."""
 	if id not in objects:
 		raise ValueError("No response found with ID: {0}".format(id))
@@ -145,3 +146,50 @@ async def get_response_headers(id: str, header: Optional[str] = None) -> str:
 		return objects[id].headers.get(header, "Header not found")
 	
 	return json.dumps(dict(objects[id].headers))
+
+
+@mcp.tool()
+async def fetch__save_object(id: str) -> str:
+	"""
+	Saves a stored object to the filesystem to avoid context window limits.
+	Returns the absolute path to the saved file.
+	"""
+	if id not in objects:
+		raise ValueError("No object found with ID: {0}".format(id))
+
+	# Get the object from memory
+	obj = objects[id]
+
+	# Define the 'jan' directory within the system temp folder
+	jan_dir = Path(tempfile.gettempdir()) / "jan"
+	
+	# Create the directory if it doesn't exist
+	jan_dir.mkdir(parents=True, exist_ok=True)
+
+	# Create the final file path
+	filename = f"mcp_obj_{id}.pkl"
+	file_path = jan_dir / filename
+
+	try:
+		# Save the object using dill in binary mode
+		with open(file_path, "wb") as f:
+			dill.dump(obj, f)
+	except Exception as e:
+		raise ToolError(f"Failed to serialize object {id}: {str(e)}")
+
+	return str(file_path)
+
+
+@mcp.tool()
+async def fetch__get_documentation() -> str:
+	"""
+	Purpose: Retrieves the server's documentation, including the state management guide and recommended workflows.
+	Produces: The full text of the project readme.
+	"""
+	try:
+		# Resolve the path relative to this script's location
+		readme_path = Path(__file__).parent / "readme.md"
+		with open(readme_path, "r", encoding="utf-8") as f:
+			return f.read()
+	except Exception as e:
+		return "Documentation currently unavailable: {0}".format(str(e))
