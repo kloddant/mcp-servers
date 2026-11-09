@@ -17,14 +17,16 @@ class Directory:
 	file_ids: List[str]
 	absolute_path: str
 
-	def __init__(self, absolute_path: str, parent_id: Optional[str] = None):
+	def __init__(self, absolute_path: str, id: str, parent_id: Optional[str] = None):
 		if not any(absolute_path.startswith(allowed) for allowed in allowed_directories):
 			raise ToolError("Access denied: Path is not in allowed directories.")
 		
+		self.id = id
 		self.absolute_path = absolute_path
 		self.parent_id = parent_id
 		self.child_ids = []
 		self.file_ids = []
+		self._populated = False # Track if children have been loaded
 
 	def __str__(self) -> str:
 		return "Directory(path={0})".format(self.absolute_path)
@@ -61,11 +63,38 @@ class Directory:
 	def is_empty(self) -> bool:
 		return not self.file_ids and not self.child_ids
 
+	def populate(self):
+		"""Reads the directory from disk and populates child/file handles if not already done."""
+		if self._populated:
+			return
+		
+		try:
+			path_obj = Path(self.absolute_path).resolve()
+			if not path_obj.is_dir():
+				return
+			
+			for entry in path_obj.iterdir():
+				try:
+					if entry.is_dir():
+						child_id = str(uuid.uuid4())
+						objects[child_id] = Directory(str(entry), child_id, parent_id=self.id)
+						self.child_ids.append(child_id)
+					else:
+						file_id = str(uuid.uuid4())
+						objects[file_id] = File(str(entry), directory_id=self.id)
+						self.file_ids.append(file_id)
+				except (PermissionError, OSError):
+					continue
+			self._populated = True
+		except (PermissionError, OSError):
+			pass
+
 	def get_manifest(self, relative_path: str = "") -> dict:
 		"""
 		Recursively maps the entire directory tree.
 		Returns a dictionary: { "path/to/file": "uuid-handle" }
 		"""
+		self.populate()
 		manifest = {}
 		
 		# Process sub-directories
@@ -179,26 +208,10 @@ async def filesystem__read_directory(dirpath: str) -> str:
 	
 	# Generate ID first so children can reference this parent
 	obj_id = str(uuid.uuid4())
-	dir_obj = Directory(str(path_obj))
+	dir_obj = Directory(str(path_obj), obj_id)
 	objects[obj_id] = dir_obj
 	
-	try:
-		entries = list(path_obj.iterdir())
-	except Exception as e:
-		raise ToolError("Error accessing directory: {0}".format(str(e)))
-	
-	for entry in entries:
-		try:
-			if entry.is_dir():
-				child_id = str(uuid.uuid4())
-				objects[child_id] = Directory(str(entry), parent_id=obj_id)
-				dir_obj.child_ids.append(child_id)
-			else:
-				file_id = str(uuid.uuid4())
-				objects[file_id] = File(str(entry), directory_id=obj_id)
-				dir_obj.file_ids.append(file_id)
-		except Exception:
-			continue
+	dir_obj.populate()
 	
 	return obj_id
 
@@ -373,7 +386,7 @@ async def filesystem__search(
 				if regex.search(d):
 					full_path = str(Path(root) / d)
 					oid = str(uuid.uuid4())
-					objects[oid] = Directory(full_path)
+					objects[oid] = Directory(full_path, oid)
 					matches.append({"object_id": oid, "line_number": 0, "snippet": d})
 		
 		if "files" in types:
