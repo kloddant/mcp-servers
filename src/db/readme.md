@@ -6,6 +6,10 @@ A Model Context Protocol (MCP) server that provides a secure, read-only interfac
 
 ### 1. Read-Only by Design
 To ensure data integrity and security, this server enforces a strict read-only posture through two layers of defense:
+
+> [!WARNING]
+> **Database Permissions**: For maximum security, you should grant **only `SELECT` permissions** and nothing else to the database users used by this server. While the server performs its own privilege verification, relying on the database's own permission system is the most secure approach to prevent unauthorized data modification.
+
 *   **Privilege Verification**: Upon connection, the server checks the database user's grants and raises an error if dangerous privileges (like `FILE`, `SUPER`, `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, or `CREATE`) are detected.
 *   **SQL Normalization Pipeline**: Every query is passed through a normalization engine that masks string literals, strips comments, and verifies that the command prefix is within the allowed set (`SELECT`, `SHOW`, `DESC`, `DESCRIBE`, `USE`).
 
