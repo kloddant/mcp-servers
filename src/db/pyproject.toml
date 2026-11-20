@@ -1,0 +1,16 @@
+[project]
+name = "db"
+version = "2026.11.16.0"
+description = "A Model Context Protocol server providing tools to read databases."
+readme = "readme.md"
+requires-python = ">=3.14"
+authors = [{ name = "Tony Klodd" }]
+maintainers = [{ name = "Tony Klodd" }]
+keywords = []
+dependencies = [
+    "mcp",
+    "typeguard",
+    "mysqlclient",
+    "pymysql",
+    "json5",
+]
