@@ -24,10 +24,10 @@ A high-performance Model Context Protocol (MCP) server providing a secure wrappe
     - `private`: Boolean indicating if the key is a private key (`True`) or public key (`False`).
 - **Produces**: A UUID handle to the loaded key object.
 
-### `serialize`
+### `dump`
 - **Purpose**: Converts a binary resource (key, ciphertext, etc.) stored in the server into a human-readable string.
 - **Parameters**: 
-    - `id`: The UUID handle of the object to serialize.
+    - `id`: The UUID handle of the object to stringify.
     - `encoding`: The character encoding to use (default `'utf-8'`).
     - `errors`: How to handle decoding errors (`'strict'`, `'replace'`, or `'ignore'`).
 - **Produces**: The decoded string representation of the binary data.

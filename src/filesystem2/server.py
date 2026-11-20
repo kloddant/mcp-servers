@@ -195,7 +195,7 @@ class SearchResult:
 @mcp.tool()
 async def filesystem__read_directory(dirpath: str) -> str:
 	"""
-	Returns a Directory object handle. Use filesystem__serialize with object_property='get_manifest' or 'list_flat' to retrieve the names of the files and directories within this handle.
+	Returns a Directory object handle. Use filesystem__dump with object_property='get_manifest' or 'list_flat' to retrieve the names of the files and directories within this handle.
 	Purpose: Initializes a Directory object for the given path and populates it with child handles.
 	Parameters:
 		dirpath: The absolute path to the directory to read.
@@ -236,20 +236,20 @@ async def filesystem__read_file(filepath: str) -> str:
 
 
 @mcp.tool()
-async def filesystem__serialize(
+async def filesystem__dump(
 	object_ids: List[str], 
 	object_property: Optional[str] = None, 
 	start_line: int = 0, 
 	stop_line: Optional[int] = None,
 ) -> str:
 	"""
-	Purpose: Returns the serialized content or a specific property of one or more objects.
+	Purpose: Returns the string representation of one or more objects stored in memory.
 	Parameters:
-		object_ids: A list of UUID handles to serialize.
+		object_ids: A list of UUID handles to stringify.
 		object_property: Optional. The name of a specific property or method to return.  The object_property parameter can be used to access both attributes and methods of the object (e.g., calling get_manifest on a Directory object).
 		start_line: Optional. The first line to read for File objects.
 		stop_line: Optional. The last line to read for File objects.
-	Produces: A string containing the serialized data, separated by delimiters.
+	Produces: A string containing the data, separated by delimiters.
 	"""
 	results = []
 	for oid in object_ids:

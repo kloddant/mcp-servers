@@ -86,7 +86,7 @@ def cryptography__load_asymmetric_key(key_pem: str, private: bool = True) -> str
 
 
 @mcp.tool()
-def cryptography__serialize(id: str, encoding: str = 'utf-8', errors: Literal['strict', 'replace', 'ignore'] = 'ignore') -> str:
+def cryptography__dump(id: str, encoding: str = 'utf-8', errors: Literal['strict', 'replace', 'ignore'] = 'ignore') -> str:
 	"""
 	Purpose: Converts a binary resource stored in the server into a human-readable string.
 	Parameters: id (UUID), encoding (str), errors (Literal).
