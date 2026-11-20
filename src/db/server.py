@@ -28,27 +28,6 @@ def db__query(connection_id: str = "", sql: str = "") -> str:
 
 
 @mcp.tool()
-def db__connect_test(connection_name: str = "", database: str = "") -> str:
-	"""
-	Purpose: Establishes a connection to a database using a predefined connection profile.
-	Parameters: 
-		- connection_name: The name of the connection profile in the configuration.
-		- database: The name of the specific database to use.
-	Return value: A UUID handle (connection_id) for the active connection, or an error message.
-	"""
-	connection_details = env.get("connections", {}).get(connection_name)
-	if not connection_details:
-		return "Error: Connection name '{0}' does not exist.".format(connection_name)
-	
-	try:
-		connection = Connection.create(database=database, **connection_details)
-		return connection.id
-	except Exception as e:
-		# Return the error as a string so the LLM can actually see it
-		return "Error connecting to database: {0}".format(str(e))
-
-
-@mcp.tool()
 def db__connect(connection_name: str = "", database: str = "") -> str:
 	"""
 	Purpose: Establishes a connection to a database using a predefined connection profile.

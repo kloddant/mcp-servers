@@ -48,7 +48,6 @@ The server requires a JSON configuration file (default: `env.json`) to define co
 
 ### Connection Management
 *   `db__connect`: Establishes a connection using a profile name from the configuration. Returns a `connection_id`.
-*   `db__connect_test`: Similar to `db__connect`, but returns the error message as a string instead of raising an exception (useful for debugging connection issues).
 *   `db__disconnect`: Closes a specific connection handle or all active connections if no ID is provided.
 *   `db__list_connection_names`: Lists available configuration profiles from `env.json`.
 *   `db__list_connections`: Lists currently active connection UUIDs.
