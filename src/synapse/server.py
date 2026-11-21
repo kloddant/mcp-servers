@@ -3,9 +3,8 @@ from typing import Dict, Optional
 from pathlib import Path
 from mcp.server import MCPServer
 
+# Global configuration object
 config: Dict = {}
-mcp = MCPServer("synapse")
-
 
 def load_config(path: str) -> None:
 	"""Loads the node configuration from a JSON file. Throws error if load fails."""
@@ -19,15 +18,57 @@ def load_config(path: str) -> None:
 	with open(absolute_path, 'r') as f:
 		config = json.load(f)
 
+# Initialize the Synapse MCP Server
+mcp = MCPServer("synapse")
+
+def _call_openai_compatible(url: str, prompt: str, model: str) -> str:
+	"""Handles requests for OpenAI-compatible APIs (Default: llama.cpp, Ollama, etc)."""
+	response = requests.post(
+		"{0}/chat/completions".format(url),
+		json={
+			"messages": [
+				{"role": "user", "content": prompt},
+			],
+			"model": model,
+		},
+		timeout=120,
+	)
+	response.raise_for_status()
+	data = response.json()
+	return data['choices'][0]['message']['content']
+
+def _call_anthropic(url: str, prompt: str, model: str, api_key: str) -> str:
+	"""Handles requests for the native Anthropic Claude API."""
+	headers = {
+		"x-api-key": api_key,
+		"anthropic-version": "2023-06-01",
+		"content-type": "application/json",
+	}
+	response = requests.post(
+		url,
+		headers=headers,
+		json={
+			"model": model,
+			"max_tokens": 4096,
+			"messages": [
+				{"role": "user", "content": prompt},
+			],
+		},
+		timeout=120,
+	)
+	response.raise_for_status()
+	data = response.json()
+	return data['content'][0]['text']
 
 @mcp.tool()
 async def synapse__ask(prompt: str, agent_id: str = "self") -> str:
 	"""
 	Sends a task to a specific node in the inference network to save main context.
+	
 	Args:
 		prompt: The task or question for the node.
 		agent_id: The ID of the node to use (e.g., 'self', 'laptop', 'old_desktop'). 
-		Defaults to 'self'.
+		           Defaults to 'self'.
 	"""
 	agents = config.get("agents", {})
 	node_data = agents.get(agent_id)
@@ -40,27 +81,26 @@ async def synapse__ask(prompt: str, agent_id: str = "self") -> str:
 	if not url:
 		return "Error: Node '{0}' is missing an endpoint in config.".format(agent_id)
 	
+	# Default to 'openai' (llama.cpp compatible) if no provider is listed
+	provider = node_data.get("provider", "openai")
+	model = node_data.get("model", "helper")
+	
 	try:
-		# llama.cpp OpenAI-compatible endpoint
-		response = requests.post(
-			"{0}/chat/completions".format(url),
-			json={
-				"messages": [
-					{"role": "user", "content": prompt},
-				],
-				"model": "helper",
-			},
-			timeout=120,
-		)
-		response.raise_for_status()
+		if provider == "anthropic":
+			api_key = node_data.get("api_key")
+			if not api_key:
+				return "Error: Node '{0}' is configured as anthropic but is missing an api_key.".format(agent_id)
+			return _call_anthropic(url, prompt, model, api_key)
+		
+		# Default path for llama.cpp and other OpenAI-compatible servers
+		return _call_openai_compatible(url, prompt, model)
+		
 	except requests.exceptions.RequestException as e:
 		return "Network error communicating with node '{0}' at {1}: {2}".format(agent_id, url, str(e))
-
-	try:
-		data = response.json()
-		return data['choices'][0]['message']['content']
 	except (KeyError, IndexError) as e:
 		return "Error parsing response from node '{0}': {1}".format(agent_id, str(e))
+	except Exception as e:
+		return "Unexpected error using node '{0}': {1}".format(agent_id, str(e))
 
 
 @mcp.tool()
