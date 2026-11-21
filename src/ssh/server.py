@@ -6,6 +6,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 
 mcp = MCPServer("ssh")
 manager: Optional['SessionManager'] = None
+objects: dict[str, object] = {}
 
 class SessionManager:
 	def __init__(self, config_path: str):
@@ -28,10 +29,16 @@ class SessionManager:
 		if server_id in self.sessions:
 			ssh, sftp = self.sessions[server_id]
 			try:
-				ssh.get_transport().is_active()
-				return sftp
+				transport = ssh.get_transport()
+				# is_active() returns a boolean; we must check the value
+				if transport and transport.is_active():
+					return sftp
 			except Exception:
-				self.close_session(server_id)
+				# If an exception occurs, the session is likely dead
+				pass
+			
+			# Close the stale session before creating a new one
+			self.close_session(server_id)
 
 		conf = self.config['servers'][server_id]
 		ssh = paramiko.SSHClient()

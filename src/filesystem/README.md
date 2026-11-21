@@ -1,377 +1,64 @@
-# Filesystem MCP Server
+# Filesystem MCP Server (v2)
 
-Node.js server implementing Model Context Protocol (MCP) for filesystem operations.
+A high-performance, path-centric filesystem server for the Model Context Protocol (MCP) designed specifically to optimize LLM context window usage and navigation.
 
-Published on npm as [`@modelcontextprotocol/server-filesystem`](https://www.npmjs.com/package/@modelcontextprotocol/server-filesystem).
+## Overview
 
-## Features
+This server provides a suite of tools that allow LLMs to interact with the filesystem using a familiar, shell-like interface. Unlike previous versions, this version is **path-centric**, meaning it uses absolute and relative paths to reduce cognitive load and tool-call overhead.
 
-- Read files
-- List directories
-- Search files
-- Grep files
-- Get file metadata
-- Directory access control from command-line arguments, with [Roots](https://modelcontextprotocol.io/docs/learn/client-concepts#roots) as a deprecated, 2025-era convenience
-- Serves both protocol eras on stdio: 2026-07-28 clients (`server/discover`, no handshake) and 2025-era clients (`initialize`)
+The server maintains a stateful **Current Working Directory (CWD)** and implements strict output controls to prevent "context bloat" (flooding the LLM's window with too much data).
 
-## Directory Access Control
+## Command Reference
 
-The server may touch only its **allowed directories**. Pass them on the command line. A 2025-era client that supports [Roots](https://modelcontextprotocol.io/docs/learn/client-concepts#roots) can also replace them at runtime, but Roots is [deprecated as of protocol version 2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28/deprecated) and a 2026-07-28 connection cannot use it.
+| Tool | Linux Equivalent | Description | Key Parameters |
+| :--- | :--- | :--- | :--- |
+| `filesystem__ls` | `ls` | Lists filenames and directory names in the current or specified path. | `path` (opt), `start_index`, `stop_index` (default 100) |
+| `filesystem__tree` | `tree` | Returns a structured JSON hierarchy of the directory tree. | `path` (opt), `max_depth`, `folders_only` |
+| `filesystem__cat` | `cat` | Reads content from one or multiple files. | `path` (str or list), `start_line`, `stop_line` (default 100) |
+| `filesystem__grep` | `grep` | Searches file contents via regex. | `pattern`, `path` (opt), `max_depth` |
+| `filesystem__find` | `find` | Searches for files/dirs by name via regex. | `pattern`, `path` (opt), `max_depth` |
+| `filesystem__glob` | `glob` | Finds files/dirs using glob patterns (e.g., `**/*.py`). | `pattern`, `path` (opt) |
+| `filesystem__stat` | `stat` | Retrieves comprehensive file/directory metadata. | `path` |
+| `filesystem__pwd` | `pwd` | Returns the current working directory. | N/A |
+| `filesystem__cd` | `cd` | Changes the current working directory. | `path` |
 
-### Method 1: Command-line Arguments (Recommended)
-Specify Allowed directories when starting the server:
-```bash
-mcp-server-filesystem /path/to/dir1 /path/to/dir2
-```
+## Key LLM Workflows
 
-This is the only method that works on every protocol version, so it is the one to use.
+### 1. Project Discovery (The "Zoom" Method)
+To understand a new project without wasting tokens:
+1.  **High-Level Map:** Use `filesystem__tree(max_depth=2, folders_only=True)` to see the folder architecture.
+2.  **Targeted List:** Use `filesystem__ls(path="src/controllers")` to see the files in a specific area of interest.
+3.  **File Triage:** Use `filesystem__grep` or `filesystem__glob` to find specific logic or file types.
+4.  **Deep Read:** Use `filesystem__cat` to read the relevant files.
 
-### Method 2: MCP Roots (Deprecated, 2025-era clients only)
-A client that connects with a 2025-era protocol version (the `initialize` handshake) and supports [Roots](https://modelcontextprotocol.io/docs/learn/client-concepts#roots) can dynamically update the Allowed directories.
+### 2. Context Window Management
+To prevent hitting token limits, the server implements:
+*   **Paginated Listing (`ls`):** Returns a subset of entries. If the total count exceeds the `stop_index`, the LLM should request the next page.
+*   **Chunked Reading (`cat`):** Defaults to the first 100 lines. The output explicitly states the **Total Lines in File**, allowing the LLM to request subsequent chunks (e.g., `start_line=100, stop_line=200`).
+*   **Structural Filtering (`tree`):** The `folders_only` flag allows the LLM to map a project's structure without listing thousands of individual files.
 
-Roots notified by Client to Server, completely replace any server-side Allowed directories when provided.
+## Security
 
-A Root reached through a symlink is allowed in both its advertised form and its resolved form, as a command-line directory is: a Root of `file:///tmp/project` on macOS allows `/tmp/project` and `/private/tmp/project`. Every requested path is still resolved and checked against the resolved directories, so a symlink inside a Root that points outside it is refused.
+The server implements a strict **Prefix-Based Sandbox**:
+*   **Allowed Roots:** Only directories explicitly listed in the server configuration (and their subdirectories) are accessible.
+*   **Path Normalization:** All paths are resolved to their absolute form using `Path.resolve()` to prevent path traversal attacks (e.g., `..` escapes).
+*   **Verification:** Every tool call re-verifies that the resolved path resides within an allowed root.
 
-**Important**: If server starts without command-line arguments AND a 2025-era client doesn't support roots protocol, the server fails at initialization: it logs the reason to stderr, closes the connection and exits with status 1. A client that supports roots but provides none (or none that are valid) keeps the connection, with no allowed directories until it sends `roots/list_changed` with valid roots.
+## Configuration Example
 
-The 2026-07-28 protocol has no `initialize` handshake and no server-to-client `roots/list` request, so a 2026-07-28 client's roots are never asked for: the command-line directories are the whole allow-list. A server started with none answers every tool call on such a connection with an error saying so.
-
-### How It Works
-
-The server's directory access control follows this flow:
-
-1. **Server Startup**
-   - Server starts with directories from command-line arguments (if provided)
-   - If no arguments provided, server starts with empty allowed directories
-
-2. **Client Connection**
-   - The client's first message picks the protocol era of the connection
-   - A **2026-07-28** client sends `server/discover` (or any request carrying the per-request `_meta` envelope): the server uses the command-line directories, and steps 3 and 4 do not apply
-   - A **2025-era** client sends `initialize` with its capabilities, and the server checks whether it supports roots (`capabilities.roots`)
-   
-3. **Roots Protocol Handling** (2025-era clients that support roots)
-   - **On initialization**: Server requests roots from client via `roots/list`
-   - Client responds with its configured roots
-   - Server replaces ALL allowed directories with client's roots
-   - Tool calls that arrive before the initial roots are loaded wait for them, so they are checked against the client's roots
-   - **On runtime updates**: Client can send `notifications/roots/list_changed`
-   - Server requests updated roots and replaces allowed directories again
-   - Tool calls that arrive while an update is being fetched wait for it, so none runs against a root the client has just withdrawn
-   - Once the client's roots are in force, an update with no valid roots revokes access: every path is refused ("Access denied - no allowed directories") until the client exposes a root again. Before any root has been in force, such an update keeps the command-line directories
-
-4. **Fallback Behavior** (2025-era clients that don't support roots)
-   - Server continues using command-line directories only
-   - No dynamic updates possible
-   - With no command-line directories either, the server logs an error, closes the connection and exits with status 1
-
-5. **Access Control**
-   - All filesystem operations are restricted to allowed directories
-   - Use `list_allowed_directories` tool to see current directories
-   - Server requires at least ONE allowed directory to operate
-
-**Note**: The server will only allow operations within directories specified either via `args` or, for a 2025-era client, via Roots.
-
-
-
-## API
-
-### Tools
-
-- **read_text_file**
-  - Read complete contents of a file as text
-  - Inputs:
-    - `path` (string)
-    - `head` (number, optional): First N lines
-    - `tail` (number, optional): Last N lines
-  - Always treats the file as UTF-8 text regardless of extension
-  - Cannot specify both `head` and `tail` simultaneously
-
-- **read_media_file**
-  - Read a file and return it as a base64-encoded content block with its MIME type
-  - Inputs:
-    - `path` (string)
-  - Streams the file and returns base64 data with the corresponding MIME type. Image and
-    audio files are returned as `image`/`audio` content; any other file type is returned as
-    an embedded `resource` (a valid MCP content block for arbitrary binary data)
-
-- **read_multiple_files**
-  - Read multiple files simultaneously
-  - Input: `paths` (string[])
-  - Failed reads won't stop the entire operation
-
-- **list_directory**
-  - List directory contents with [FILE] or [DIR] prefixes
-  - Input: `path` (string)
-
-- **list_directory_with_sizes**
-  - List directory contents with [FILE] or [DIR] prefixes, including file sizes
-  - Inputs:
-    - `path` (string): Directory path to list
-    - `sortBy` (string, optional): Sort entries by "name" or "size" (default: "name")
-  - Returns detailed listing with file sizes and summary statistics
-  - Shows total files, directories, and combined size
-
-- **search_files**
-  - Recursively search for files/directories that match or do not match patterns
-  - Inputs:
-    - `path` (string): Starting directory
-    - `pattern` (string): Search pattern
-    - `excludePatterns` (string[]): Exclude any patterns. An excluded entry is
-      skipped before it is resolved or read, so excluding a slow folder keeps
-      the search out of it entirely.
-  - Glob-style pattern matching
-  - Returns full paths to matches
-  - Bounded: see [Slow and very large trees](#slow-and-very-large-trees)
-
-- **grep_files**
-  - Search for a specific string or regular expression within the contents of files across one or more directories.
-  - Inputs:
-    - `paths` (string or string[]): The root directory or list of root directories to search within.
-    - `pattern` (string): The string or regular expression to search for.
-    - `extensions` (string[], optional): A list of file extensions to include (e.g., `['ts', 'md', 'txt']`). If omitted, all files are searched. This is useful for skipping binary files.
-    - `excluded_folder_names` (string[], optional): A list of folder names to exclude from the search (e.g., `['node_modules', '.git']`).
-    - `max_depth` (number, optional): Maximum depth to recurse into subdirectories. 0 means only the provided paths are searched.
-  - Returns a list of matches including the file path, line number, and the line text.
-
-- **directory_tree**
-  - Get recursive JSON tree structure of directory contents
-  - Inputs:
-    - `path` (string): Starting directory
-    - `excludePatterns` (string[]): Exclude any patterns. Glob formats are supported.
-  - Returns:
-    - JSON array where each entry contains:
-      - `name` (string): File/directory name
-      - `type` ('file'|'directory'): Entry type
-      - `children` (array): Present only for directories
-        - Empty array for empty directories
-        - Omitted for files
-  - Output is formatted with 2-space indentation for readability
-  - Bounded: see [Slow and very large trees](#slow-and-very-large-trees)
-    
-- **get_file_info**
-  - Get detailed file/directory metadata
-  - Input: `path` (string)
-  - Returns:
-    - Size
-    - Creation time
-    - Modified time
-    - Access time
-    - Type (file/directory)
-    - Permissions
-    - Hard-link count (`hardLinks`): the number of names the file has. More
-      than 1 means a write through this name changes the file at its other
-      names too (see `write_file`)
-
-- **list_allowed_directories**
-  - List all directories the server is allowed to access
-  - No input required
-  - Returns:
-    - Directories that this server can read/write from. A directory reached through a symlink is listed twice, in the form it was given and in its resolved form
-
-### Slow and very large trees
-
-A folder backed by a cloud-storage provider (macOS `~/Library/CloudStorage`,
-iCloud Drive) or a slow network mount can make a single filesystem call block
-for minutes while the provider fetches metadata. Two fixed limits keep one
-request from stalling the server:
-
-- **Resolving a path (in any tool), and each directory read in `search_files`
-  and `directory_tree`, waits at most 15 seconds.** A call that takes longer ends
-  the request with an error naming the path (`Filesystem call timed out after
-  15000 ms: ...`). A path whose real location cannot be read in time is
-  refused, never admitted.
-- **`search_files` and `directory_tree` visit at most 100,000 entries.** A walk
-  that reaches the cap ends with an error (`... stopped after visiting 100000
-  entries ...`) rather than a partial result. Excluded entries do not count.
-
-Either error means: narrow `path`, or name the slow or large folder in
-`excludePatterns`. A timed-out call cannot be cancelled and finishes in the
-background, so a provider that stalls repeatedly can still slow the server's
-other file operations until it answers.
-
-### Tool annotations (MCP hints)
-
-This server sets [MCP ToolAnnotations](https://modelcontextprotocol.io/specification/2025-03-26/server/tools#toolannotations)
-on each tool so clients can:
-
-- Distinguish **read‑only** tools from write‑capable tools.
-- Understand which write operations are **idempotent** (safe to retry with the same arguments).
-- Highlight operations that may be **destructive** (overwriting or heavily mutating data).
-- Signal that a tool does **not** reach an open or external world (every filesystem tool sets `openWorldHint: false`).
-
-The mapping for filesystem tools is:
-
-| Tool                        | readOnlyHint | idempotentHint | destructiveHint | Notes                                            |
-|-----------------------------|--------------|----------------|-----------------|--------------------------------------------------|
-| `read_text_file`            | `true`       | –              | –               | Pure read                                       |
-| `read_media_file`           | `true`       | –              | –               | Pure read                                       |
-| `read_multiple_files`       | `true`       | –              | –               | Pure read                                       |
-| `list_directory`            | `true`       | –              | –               | Pure read                                       |
-| `list_directory_with_sizes` | `true`       | –              | –               | Pure read                                       |
-| `directory_tree`            | `true`       | –              | –               | Pure read                                       |
-| `search_files`              | `true`       | –              | –               | Pure read                                       |
-| `grep_files`                | `true`       | -              | -               | Pure read                                       |
-| `get_file_info`             | `true`       | –              | –               | Pure read                                       |
-| `list_allowed_directories`  | `true`       | –              | –               | Pure read                                       |
-
-> Note: `idempotentHint` and `destructiveHint` are meaningful only when `readOnlyHint` is `false`, as defined by the MCP spec. Every tool also sets `openWorldHint: false` — this server only accesses the local filesystem within its allowed directories, never an open or external world.
-
-## Requirements
-
-Node.js 24 or later, when the server runs through `npx` or from source.
-
-## Usage with Claude Desktop
-Add this to your `claude_desktop_config.json`:
-
-Note: you can provide sandboxed directories to the server by mounting them to `/projects`. Adding the `ro` flag will make the directory readonly by the server.
-
-### Docker
-Note: all directories must be mounted to `/projects` by default.
+When adding this server to your MCP configuration, ensure you provide the absolute paths to the directories you wish to make accessible:
 
 ```json
 {
-  "mcpServers": {
-    "filesystem": {
-      "command": "docker",
-      "args": [
-        "run",
-        "-i",
-        "--rm",
-        "--mount", "type=bind,src=/Users/username/Desktop,dst=/projects/Desktop",
-        "--mount", "type=bind,src=/path/to/other/allowed/dir,dst=/projects/other/allowed/dir,ro",
-        "--mount", "type=bind,src=/path/to/file.txt,dst=/projects/path/to/file.txt",
-        "mcp/filesystem",
-        "/projects"
-      ]
-    }
+  "Filesystem2": {
+    "command": "path/to/python.exe",
+    "args": [
+      "path/to/__main__.py",
+      "--allowed-directories",
+      "C:\\Users\\USER\\Documents\\ProjectA",
+      "D:\\Projects\\ProjectB"
+    ],
+    "type": "stdio"
   }
 }
 ```
-
-### NPX
-
-```json
-{
-  "mcpServers": {
-    "filesystem": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "/Users/username/Desktop",
-        "/path/to/other/allowed/dir"
-      ]
-    }
-  }
-}
-```
-
-On Windows, use `cmd /c` to launch `npx`:
-
-```json
-{
-  "mcpServers": {
-    "filesystem": {
-      "command": "cmd",
-      "args": [
-        "/c",
-        "npx",
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "/Users/username/Desktop",
-        "/path/to/other/allowed/dir"
-      ]
-    }
-  }
-}
-```
-
-## Usage with VS Code
-
-For quick installation, click the installation buttons below...
-
-[![Install with NPX in VS Code](https://img.shields.io/badge/VS_Code-NPM-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=filesystem&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40modelcontextprotocol%2Fserver-filesystem%22%2C%22%24%7BworkspaceFolder%7D%22%5D%7D) [![Install with NPX in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-NPM-24bfa5?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=filesystem&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22%40modelcontextprotocol%2Fserver-filesystem%22%2C%22%24%7BworkspaceFolder%7D%22%5D%7D&quality=insiders)
-
-[![Install with Docker in VS Code](https://img.shields.io/badge/VS_Code-Docker-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=filesystem&config=%7B%22command%22%3A%22docker%22%2C%22args%22%3A%5B%22run%22%2C%22-i%22%2C%22--rm%22%2C%22--mount%22%2C%22type%3Dbind%2Csrc%3D%24%7BworkspaceFolder%7D%2Cdst%3D%2Fprojects%2Fworkspace%22%2C%22mcp%2Ffilesystem%22%2C%22%2Fprojects%22%5D%7D) [![Install with Docker in VS Code Insiders](https://img.shields.io/badge/VS_Code_Insiders-Docker-24bfa5?style=flat-square&logo=visualstudiocode&logoColor=white)](https://insiders.vscode.dev/redirect/mcp/install?name=filesystem&config=%7B%22command%22%3A%22docker%22%2C%22args%22%3A%5B%22run%22%2C%22-i%22%2C%22--rm%22%2C%22--mount%22%2C%22type%3Dbind%2Csrc%3D%24%7BworkspaceFolder%7D%2Cdst%3D%2Fprojects%2Fworkspace%22%2C%22mcp%2Ffilesystem%22%2C%22%2Fprojects%22%5D%7D&quality=insiders)
-
-For manual installation, you can configure the MCP server using one of these methods:
-
-**Method 1: User Configuration (Recommended)**
-Add the configuration to your user-level MCP configuration file. Open the Command Palette (`Ctrl + Shift + P`) and run `MCP: Open User Configuration`. This will open your user `mcp.json` file where you can add the server configuration.
-
-**Method 2: Workspace Configuration**
-Alternatively, you can add the configuration to a file called `.vscode/mcp.json` in your workspace. This will allow you to share the configuration with others.
-
-> For more details about MCP configuration in VS Code, see the [official VS Code MCP documentation](https://code.visualstudio.com/docs/copilot/customization/mcp-servers).
-
-You can provide sandboxed directories to the server by mounting them to `/projects`. Adding the `ro` flag will make the directory readonly by the server.
-
-### Docker
-Note: all directories must be mounted to `/projects` by default. 
-
-```json
-{
-  "servers": {
-    "filesystem": {
-      "command": "docker",
-      "args": [
-        "run",
-        "-i",
-        "--rm",
-        "--mount", "type=bind,src=${workspaceFolder},dst=/projects/workspace",
-        "mcp/filesystem",
-        "/projects"
-      ]
-    }
-  }
-}
-```
-
-### NPX
-
-```json
-{
-  "servers": {
-    "filesystem": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "${workspaceFolder}"
-      ]
-    }
-  }
-}
-```
-
-On Windows, use:
-
-```json
-{
-  "servers": {
-    "filesystem": {
-      "command": "cmd",
-      "args": [
-        "/c",
-        "npx",
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "${workspaceFolder}"
-      ]
-    }
-  }
-}
-```
-
-## Build
-
-Docker build:
-
-```bash
-docker build -t mcp/filesystem -f src/filesystem/Dockerfile .
-```
-
-## License
-
-This MCP server is licensed under the MIT License. This means you are free to use, modify, and distribute the software, subject to the terms and conditions of the MIT License. For more details, please see the LICENSE file in the project repository.

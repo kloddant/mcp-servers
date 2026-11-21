@@ -10,7 +10,7 @@ While it started as a clone of the reference implementations, I have expanded it
 These servers were built from scratch or heavily modified to provide specialized functionality:
 *   **Cryptography**: Tools for encryption, decryption, and cryptographic operations.
 *   **DB**: Custom database interface and query tools.
-*   **Filesystem**: (Currently `filesystem2`) Advanced file system operations.
+*   **Filesystem**: Advanced file system operations.
 *   **Geography**: Location-based services and geospatial calculations.
 *   **HTML**: Specialized HTML parsing and manipulation tools.
 *   **Math**: Extended mathematical functions and calculations.
@@ -19,7 +19,6 @@ These servers were built from scratch or heavily modified to provide specialized
 
 ### Reference Servers (Original)
 I have retained these official reference implementations for their core utility:
-*   **Filesystem**: (Deprecated) File system operations.
 *   **Git**: Tools to read, search, and manipulate Git repositories.
 *   **Memory**: Knowledge graph-based persistent memory system.
 *   **Sequential Thinking**: Dynamic and reflective problem-solving through thought sequences.
