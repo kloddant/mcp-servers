@@ -21,44 +21,6 @@ def load_config(path: str) -> None:
 # Initialize the Synapse MCP Server
 mcp = MCPServer("synapse")
 
-def _call_openai_compatible(url: str, prompt: str, model: str) -> str:
-	"""Handles requests for OpenAI-compatible APIs (Default: llama.cpp, Ollama, etc)."""
-	response = requests.post(
-		"{0}/chat/completions".format(url),
-		json={
-			"messages": [
-				{"role": "user", "content": prompt},
-			],
-			"model": model,
-		},
-		timeout=120,
-	)
-	response.raise_for_status()
-	data = response.json()
-	return data['choices'][0]['message']['content']
-
-def _call_anthropic(url: str, prompt: str, model: str, api_key: str) -> str:
-	"""Handles requests for the native Anthropic Claude API."""
-	headers = {
-		"x-api-key": api_key,
-		"anthropic-version": "2023-06-01",
-		"content-type": "application/json",
-	}
-	response = requests.post(
-		url,
-		headers=headers,
-		json={
-			"model": model,
-			"max_tokens": 4096,
-			"messages": [
-				{"role": "user", "content": prompt},
-			],
-		},
-		timeout=120,
-	)
-	response.raise_for_status()
-	data = response.json()
-	return data['content'][0]['text']
 
 @mcp.tool()
 async def synapse__ask(prompt: str, agent_id: str = "self") -> str:
@@ -70,6 +32,46 @@ async def synapse__ask(prompt: str, agent_id: str = "self") -> str:
 		agent_id: The ID of the node to use (e.g., 'self', 'laptop', 'old_desktop'). 
 		           Defaults to 'self'.
 	"""
+
+	def _call_openai_compatible(url: str, prompt: str, model: str) -> str:
+		"""Handles requests for OpenAI-compatible APIs (Default: llama.cpp, Ollama, etc)."""
+		response = requests.post(
+			"{0}/chat/completions".format(url),
+			json={
+				"messages": [
+					{"role": "user", "content": prompt},
+				],
+				"model": model,
+			},
+			timeout=120,
+		)
+		response.raise_for_status()
+		data = response.json()
+		return data['choices'][0]['message']['content']
+
+	def _call_anthropic(url: str, prompt: str, model: str, api_key: str) -> str:
+		"""Handles requests for the native Anthropic Claude API."""
+		headers = {
+			"x-api-key": api_key,
+			"anthropic-version": "2023-06-01",
+			"content-type": "application/json",
+		}
+		response = requests.post(
+			url,
+			headers=headers,
+			json={
+				"model": model,
+				"max_tokens": 4096,
+				"messages": [
+					{"role": "user", "content": prompt},
+				],
+			},
+			timeout=120,
+		)
+		response.raise_for_status()
+		data = response.json()
+		return data['content'][0]['text']
+	
 	agents = config.get("agents", {})
 	node_data = agents.get(agent_id)
 	
@@ -117,3 +119,26 @@ def synapse__get_documentation() -> str:
 			return f.read()
 	except Exception as e:
 		return "Documentation currently unavailable: {0}".format(str(e))
+
+
+@mcp.tool()
+def synapse__list_agents() -> str:
+	"""
+	Lists all available agents configured in the synapse network.
+	
+	Returns:
+		A string listing the agent IDs and their basic configuration.
+	"""
+	agents = config.get("agents", {})
+	
+	if not agents:
+		return "No agents are currently configured in the synapse network."
+	
+	lines = ["Available Agents:"]
+	for agent_id, data in agents.items():
+		provider = data.get("provider", "openai")
+		model = data.get("model", "helper")
+		endpoint = data.get("endpoint", "Unknown")
+		lines.append("- {0}: {1} ({2}) at {3}".format(agent_id, model, provider, endpoint))
+	
+	return "\n".join(lines)
