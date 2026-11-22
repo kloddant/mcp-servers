@@ -124,21 +124,14 @@ def synapse__get_documentation() -> str:
 @mcp.tool()
 def synapse__list_agents() -> str:
 	"""
-	Lists all available agents configured in the synapse network.
+	Lists all available agent IDs configured in the synapse network.
 	
 	Returns:
-		A string listing the agent IDs and their basic configuration.
+		A string containing only the available agent IDs.
 	"""
 	agents = config.get("agents", {})
 	
 	if not agents:
 		return "No agents are currently configured in the synapse network."
 	
-	lines = ["Available Agents:"]
-	for agent_id, data in agents.items():
-		provider = data.get("provider", "openai")
-		model = data.get("model", "helper")
-		endpoint = data.get("endpoint", "Unknown")
-		lines.append("- {0}: {1} ({2}) at {3}".format(agent_id, model, provider, endpoint))
-	
-	return "\n".join(lines)
+	return ", ".join(agents.keys())

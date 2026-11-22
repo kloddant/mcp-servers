@@ -16,6 +16,7 @@ These servers were built from scratch or heavily modified to provide specialized
 *   **Math**: Extended mathematical functions and calculations.
 *   **Regex**: Advanced regular expression testing and manipulation.
 *   **SSH**: Remote server management and command execution.
+*   **Synapse**: A distributed inference bridge to offload tasks to secondary LLM nodes across a network.
 
 ### Reference Servers (Original)
 I have retained these official reference implementations for their core utility:
@@ -69,6 +70,23 @@ To use these servers in Jan, you must configure them individually. Point the con
   "Git": {
     "command": "C:\\path\\to\\modelcontextprotocol\\src\\git\\venv\\Scripts\\python.exe",
     "args": ["-m", "mcp_server_git"],
+    "env": {},
+    "type": "stdio",
+    "active": true
+  }
+}
+```
+
+**Example Synapse Server (Requires Config File):**
+```json
+{
+  "Synapse": {
+    "command": "C:\\path\\to\\modelcontextprotocol\\src\\synapse\\venv\\Scripts\\python.exe",
+    "args": [
+      "C:\\path\\to\\modelcontextprotocol\\src\\synapse\\​__main__​.py",
+      "--config",
+      "C:\\path\\to\\modelcontextprotocol\\src\\synapse\\env.json"
+    ],
     "env": {},
     "type": "stdio",
     "active": true

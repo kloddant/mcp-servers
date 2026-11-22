@@ -43,6 +43,7 @@ To add Synapse to Jan, use the following configuration in the MCP settings:
 `python <path-to-synapse>\__main__.py --config <path-to-synapse>\env.json`
 
 ## Tools
+
 ### `synapse__ask`
 The primary tool used by the LLM to offload work to a specific node.
 
@@ -54,6 +55,12 @@ The primary tool used by the LLM to offload work to a specific node.
 **Example Usage:**
 If the main LLM needs to process a large file and knows the `old_desktop` has the most VRAM, it will call:
 `synapse__ask(prompt="Analyze this large dataset...", agent_id="old_desktop")`
+
+### `synapse__list_agents`
+Lists all available agents currently configured in the synapse network, including their model, provider, and endpoint.
+
+**Arguments:**
+- None
 
 ### `synapse__get_documentation`
 Retrieves the full text of the Synapse README to provide the LLM with updated instructions on how to use the network.
